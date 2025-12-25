@@ -1,0 +1,20 @@
+import mongoose, { Document, Schema } from "mongoose";
+
+export interface IAttendance extends Document {
+  _id: mongoose.Types.ObjectId;
+  staffId: mongoose.Types.ObjectId;
+  date: Date;
+  timeIn: Date;
+  timeOut?: Date;
+  totalHours?: number;
+}
+
+const AttendanceSchema: Schema = new Schema({
+  staffId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  date: { type: Date, required: true },
+  timeIn: { type: Date, required: true },
+  timeOut: { type: Date },
+  totalHours: { type: Number },
+});
+
+export default mongoose.model<IAttendance>("Attendance", AttendanceSchema);
