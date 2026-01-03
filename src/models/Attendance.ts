@@ -7,14 +7,16 @@ export interface IAttendance extends Document {
   timeIn: Date;
   timeOut?: Date;
   totalHours?: number;
+  scannedBy: mongoose.Types.ObjectId;
 }
 
 const AttendanceSchema: Schema = new Schema({
   staffId: { type: Schema.Types.ObjectId, ref: "User", required: true },
   date: { type: Date, required: true },
   timeIn: { type: Date, required: true },
-  timeOut: { type: Date },
-  totalHours: { type: Number },
+  timeOut: { type: Date, default: null },
+  totalHours: { type: Number }, scannedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+
 });
 
 export default mongoose.model<IAttendance>("Attendance", AttendanceSchema);

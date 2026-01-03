@@ -1,0 +1,99 @@
+
+export const scanQR = async (req: AuthRequest, res: Response) => {
+  const { qrString, mode, reason } = req.body; // mode: 'checkin' or 'checkout'
+
+  const reasonType = ['break', 'go out', 'attendance',]
+
+
+  try {
+    const qrCode = await QRCode.findOne({ qrString });
+    if (!reason) return res.status(404).json({ message: "Reason is required. Please provide a reason" });
+    if (!qrCode) {
+      return res.status(404).json({ message: "QR code not found" });
+    }
+
+    const user = await User.findById(qrCode.userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (mode === "checkin") {
+      // Check if already checked in
+      const existingLog = await Log.findOne({
+        userId: user._id,
+        date: { $gte: today },
+        timeOut: null,
+      });
+
+      if (existingLog) {
+        return res.status(400).json({ message: "User already checked in" });
+      }
+
+      const log = new Log({
+        userId: user._id,
+        qrId: qrCode._id,
+        date: new Date(),
+        timeIn: new Date(),
+        status: "In TUP",
+        scannedBy: req.user.id,
+      });
+
+      await log.save();
+
+      // If staff, create attendance
+      if (user.role === "Staff") {
+        const attendance = new Attendance({
+          staffId: user._id,
+          date: new Date(),
+          timeIn: new Date(),
+        });
+        await attendance.save();
+      }
+
+      user.status = "In TUP";
+      await user.save();
+
+      res.json({ message: "Check-in successful", log });
+    } else if (mode === "checkout") {
+      const log = await Log.findOne({
+        userId: user._id,
+        date: { $gte: today },
+        timeOut: null,
+      });
+
+      if (!log) {
+        return res.status(400).json({ message: "No active check-in found" });
+      }
+
+      log.timeOut = new Date();
+      log.status = "Checked Out";
+      await log.save();
+
+      // Update attendance if staff
+      if (user.role === "Staff") {
+        const attendance = await Attendance.findOne({
+          staffId: user._id,
+          date: { $gte: today },
+          timeOut: null,
+        });
+        if (attendance) {
+          attendance.timeOut = new Date();
+          attendance.totalHours =
+            (attendance.timeOut.getTime() - attendance.timeIn.getTime()) /
+            (1000 * 60 * 60);
+          await attendance.save();
+        }
+      }
+
+      user.status = "Active";
+      await user.save();
+
+      res.json({ message: "Check-out successful", log });
+    }
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+};

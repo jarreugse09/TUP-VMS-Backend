@@ -34,3 +34,31 @@ export const authorizeRoles = (...roles: string[]) => {
     next();
   };
 };
+
+
+
+
+export const authorizeRoleOrStaffType = (
+  roles: string[] = [],
+  staffTypes: string[] = []
+) => {
+  return (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const hasRole =
+      roles.length > 0 && roles.includes(req.user.role);
+
+    const hasStaffType =
+      staffTypes.length > 0 &&
+      req.user.staffType &&
+      staffTypes.includes(req.user.staffType);
+
+    if (!hasRole && !hasStaffType) {
+      return res.status(403).json({ message: "Insufficient permissions" });
+    }
+
+    next();
+  };
+};

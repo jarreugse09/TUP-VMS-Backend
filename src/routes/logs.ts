@@ -3,13 +3,29 @@ import {
   scanQR,
   recordActivity,
   getLogs,
-  getActivities,
+  getActivities, visitorScanQR,
+  scanTransactionQR,
 } from "../controllers/logController";
-import { authenticateToken, authorizeRoles } from "../middlewares/auth";
+import { authenticateToken, authorizeRoleOrStaffType, authorizeRoles, } from "../middlewares/auth";
 
 const router = express.Router();
 
-router.post("/scan", authenticateToken, authorizeRoles("TUP"), scanQR);
+router.post(
+  "/scan",
+  authenticateToken,
+  authorizeRoleOrStaffType(
+    ["TUP", "Staff"],
+    ["TUP", "HR HEAD", "Security"]
+  ),
+  scanQR
+);
+
+
+
+
+router.post("/staff/scan", authenticateToken, authorizeRoles("Staff"), scanTransactionQR);
+
+router.post("/user/scan", authenticateToken, authorizeRoles("Visitor", "Student"), visitorScanQR);
 router.post("/activity", authenticateToken, recordActivity);
 router.get("/logs", authenticateToken, authorizeRoles("TUP"), getLogs);
 router.get("/activities", authenticateToken, getActivities);
