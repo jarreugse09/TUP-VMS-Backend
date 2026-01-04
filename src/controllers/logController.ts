@@ -728,7 +728,7 @@ export const recordActivity = async (req: AuthRequest, res: Response) => {
 export const getLogs = async (req: AuthRequest, res: Response) => {
   try {
     const logs = await Log.find()
-      .populate("userId", "firstName surname role")
+      .populate("userId", "firstName surname role photoURL")
       .populate("scannedBy", "firstName surname")
       .sort({ date: -1 });
     res.json(logs);
