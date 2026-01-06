@@ -19,10 +19,10 @@ const LogSchema: Schema = new Schema({
   transId: { type: Schema.Types.ObjectId, ref: "User" },
   qrId: { type: Schema.Types.ObjectId, ref: "QRCode", required: true },
   date: { type: Date, required: true },
-  timeIn: { type: Date, required: true, default: null },
+  timeIn: { type: Date, default: null },
   timeOut: { type: Date, default: null },
   status: { type: String, enum: ["In TUP", "Checked Out", 'Transaction'], required: true },
-  reason: { type: String, },
+  reason: { type: String, default: null },
   scannedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
   approvedBy: { type: String },
 });

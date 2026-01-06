@@ -173,10 +173,12 @@ export const scanQR = catchAsync(
           date: new Date(),
           timeIn: new Date(),
           status: "In TUP",
+          reason: 'transaction',
           scannedBy: req.user.id,
         });
 
         await log.save();
+        return res.status(201).json({ message: "Checked In Successfully" })
       }
 
       // ---------- CHECK-OUT ----------
@@ -197,6 +199,8 @@ export const scanQR = catchAsync(
         existingLog.timeOut = new Date();
         existingLog.status = "Checked Out";
         await existingLog.save();
+
+        return res.status(201).json({ message: "Checked Out Successfully" })
       }
     }
 
@@ -259,13 +263,13 @@ export const scanQR = catchAsync(
         }
 
         // ---------- BREAK / GO OUT (RETURN) ----------
-        else if (reason === "go out" || reason === "break") {
+        else if (reason === "go out") {
 
           // Check latest checked-out log with same reason
           const existingLog = await Log.findOne({
             userId: user._id,
             status: "Checked Out",
-            reason: { $in: ["break", "go out"] },
+            reason: 'go out',
             timeOut: { $gte: today },
           });
 
@@ -274,6 +278,11 @@ export const scanQR = catchAsync(
             existingLog.timeIn = new Date();
             existingLog.status = "In TUP";
             await existingLog.save();
+
+            return res.status(200).json({
+              message: "Check-in successful",
+              log: existingLog
+            });
           } else {
             // Create new log
             const newLog = await Log.create({
@@ -292,6 +301,46 @@ export const scanQR = catchAsync(
             }
           }
         }
+
+        else if (reason === "break") {
+
+          const existingLog = await Log.findOne({
+            userId: user._id,
+            status: "Checked Out",
+            reason: "break",
+            timeOut: { $gte: today },
+          });
+
+          if (existingLog) {
+            existingLog.timeIn = new Date();
+            existingLog.status = "In TUP";
+            await existingLog.save();
+
+            return res.status(200).json({
+              message: "Break return successful",
+              log: existingLog,
+            });
+          } else {
+            const newLog = await Log.create({
+              userId: user._id,
+              qrId: qrCode._id,
+              date: new Date(),
+              timeIn: new Date(),
+              timeOut: null,
+              reason: "break",
+              status: "In TUP",
+              scannedBy: req.user.id,
+            });
+
+            return res.status(201).json({
+              message: "Break check-in successful",
+              log: newLog,
+            });
+          }
+        }
+        else { return next(new AppError("Invalid reason", 500)); }
+
+
       }
 
       // ======================
@@ -339,7 +388,30 @@ export const scanQR = catchAsync(
             message: "Check out successful.",
           });
         }
+        else if (reason === 'break') {
 
+
+          const newLog = await Log.create({
+            userId: user._id,
+            qrId: qrCode._id,
+            date: new Date(),
+            timeOut: new Date(),
+            timeIn: null,
+            status: "Checked Out",
+            reason: "break",
+            scannedBy: req.user.id,
+          });
+
+          if (!newLog) {
+            return next(new AppError("Saving log failed.", 404));
+          }
+
+          return res.status(201).json({
+            status: "success",
+            message: "Check out successful.",
+          });
+
+        }
         // ---------- GO OUT ----------
         else if (reason === "go out") {
 
@@ -398,6 +470,10 @@ export const scanQR = catchAsync(
             });
           }
         }
+
+        else { return next(new AppError("Invalid reason", 500)); }
+
+
       }
     }
   }
@@ -725,17 +801,137 @@ export const recordActivity = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const getLogs = async (req: AuthRequest, res: Response) => {
-  try {
-    const logs = await Log.find()
-      .populate("userId", "firstName surname role photoURL")
-      .populate("scannedBy", "firstName surname")
-      .sort({ date: -1 });
-    res.json(logs);
-  } catch (error) {
-    res.status(500).json({ message: "Server error" });
+// export const getLogs = async (req: AuthRequest, res: Response) => {
+//   try {
+//     const logs = await Log.find()
+//       .populate("userId", "firstName surname role photoURL")
+//       .populate("scannedBy", "firstName surname")
+//       .sort({ date: -1 });
+//     res.json(logs);
+//   } catch (error) {
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
+
+
+export const getLogs = catchAsync(async (req: AuthRequest, res: Response) => {
+  const logs = await Log.find()
+    .populate("userId", "firstName surname role photoURL birthdate")
+    .sort({ date: 1, timeIn: 1 });
+
+  const grouped: Record<string, any> = {};
+
+  for (const log of logs) {
+    const dateKey = log.date.toISOString().split("T")[0];
+    const key = `${log.userId._id}-${dateKey}`;
+
+    // choose the most accurate timestamp for ordering
+    const logTimestamp =
+      log.timeOut ??
+      log.timeIn ??
+      log.date;
+
+    if (!grouped[key]) {
+      grouped[key] = {
+        _id: key,
+        date: log.date,
+        user: log.userId,
+
+        dailyStatus: log.status,
+        _latestTime: logTimestamp,
+
+        attendance: null,
+        activities: [],
+      };
+    }
+
+    if (log.reason === "attendance") {
+      grouped[key].attendance = {
+        timeIn: log.timeIn,
+        timeOut: log.timeOut,
+        status: log.status,
+      };
+    } else if (log.reason) {
+      grouped[key].activities.push({
+        reason: log.reason,
+        timeIn: log.timeIn,
+        timeOut: log.timeOut,
+        status: log.status,
+      });
+    }
+
+    /** ---------- DAILY STATUS (LATEST LOG WINS) ---------- */
+    if (logTimestamp > grouped[key]._latestTime) {
+      grouped[key].dailyStatus = log.status;
+      grouped[key]._latestTime = logTimestamp;
+    }
   }
-};
+
+  // remove internal helper field
+  const result = Object.values(grouped).map(({ _latestTime, ...rest }) => rest);
+
+  res.json(result);
+});
+
+export const getStaffLogs = catchAsync(async (req: AuthRequest, res: Response, next: NextFunction) => {
+
+  const logs = await Log.find({ userId: req.user.id })
+    .populate("userId", "firstName surname role photoURL birthdate")
+    .sort({ date: 1, timeIn: 1 });
+
+  const grouped: Record<string, any> = {};
+
+  for (const log of logs) {
+    const dateKey = log.date.toISOString().split("T")[0];
+    const key = `${log.userId._id}-${dateKey}`;
+
+    // choose the most accurate timestamp for ordering
+    const logTimestamp =
+      log.timeOut ??
+      log.timeIn ??
+      log.date;
+
+    if (!grouped[key]) {
+      grouped[key] = {
+        _id: key,
+        date: log.date,
+        user: log.userId,
+
+        dailyStatus: log.status,
+        _latestTime: logTimestamp,
+
+        attendance: null,
+        activities: [],
+      };
+    }
+
+    if (log.reason === "attendance") {
+      grouped[key].attendance = {
+        timeIn: log.timeIn,
+        timeOut: log.timeOut,
+        status: log.status,
+      };
+    } else if (log.reason) {
+      grouped[key].activities.push({
+        reason: log.reason,
+        timeIn: log.timeIn,
+        timeOut: log.timeOut,
+        status: log.status,
+      });
+    }
+
+    /** ---------- DAILY STATUS (LATEST LOG WINS) ---------- */
+    if (logTimestamp > grouped[key]._latestTime) {
+      grouped[key].dailyStatus = log.status;
+      grouped[key]._latestTime = logTimestamp;
+    }
+  }
+
+  // remove internal helper field
+  const result = Object.values(grouped).map(({ _latestTime, ...rest }) => rest);
+
+  res.json(result);
+});
 
 export const getActivities = async (req: AuthRequest, res: Response) => {
   try {
