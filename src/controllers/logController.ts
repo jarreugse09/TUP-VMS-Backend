@@ -840,7 +840,8 @@ export const getLogs = catchAsync(async (req: AuthRequest, res: Response) => {
 
   for (const log of logs) {
     const dateKey = log.date.toISOString().split("T")[0];
-    const key = `${log.userId._id}-${dateKey}`;
+    const user = log.userId as any;
+    const key = `${user._id}-${dateKey}`;
 
     // choose the most accurate timestamp for ordering
     const logTimestamp =
@@ -927,7 +928,8 @@ export const getStaffLogs = catchAsync(async (req: AuthRequest, res: Response, n
 
   for (const log of logs) {
     const dateKey = log.date.toISOString().split("T")[0];
-    const key = `${log.userId._id}-${dateKey}`;
+    const user = log.userId as any;
+    const key = `${user._id}-${dateKey}`;
 
     // choose the most accurate timestamp for ordering
     const logTimestamp =
@@ -1014,3 +1016,123 @@ export const getActivities = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+// Export logs with password verification and CSV/XLSX support
+export const exportLogs = catchAsync(async (req: AuthRequest, res: Response, next: NextFunction) => {
+  const { startDate, endDate, month, format } = req.body;
+  const { password } = req.body;
+
+  if (!password || !format) {
+    return next(new AppError('Password and format are required', 400));
+  }
+
+  // verify password
+  const user = await User.findById(req.user.id).select('+passwordHash');
+  if (!user) return next(new AppError('User not found', 404));
+
+  const isMatch = await require('bcryptjs').compare(password, user.passwordHash);
+  if (!isMatch) return next(new AppError('Invalid password', 401));
+
+  // determine date range
+  let start: Date, end: Date;
+  if (month) {
+    const [year, mon] = month.split('-').map((v: string) => parseInt(v, 10));
+    start = new Date(year, mon - 1, 1);
+    end = new Date(year, mon, 0, 23, 59, 59, 999);
+  } else if (startDate && endDate) {
+    start = new Date(startDate);
+    start.setHours(0,0,0,0);
+    end = new Date(endDate);
+    end.setHours(23,59,59,999);
+  } else {
+    return next(new AppError('Date range or month required', 400));
+  }
+
+  // construct query
+  let query: any = {
+    date: { $gte: start, $lte: end },
+    reason: 'attendance'
+  };
+
+  // if not TUP (admin), limit to own logs only
+  if (req.user.role !== 'TUP') {
+    query.userId = req.user.id;
+  }
+
+  const logs = await Log.find(query).populate('userId', 'firstName surname role').sort({ date: -1 });
+
+  // Group by user+date to get timeIn/timeOut/status
+  const grouped: Record<string, any> = {};
+  for (const log of logs) {
+    const dateKey = log.date.toISOString().split('T')[0];
+    const user = log.userId as any;
+    const key = `${user._id}-${dateKey}`;
+    const logTimestamp = log.timeOut ?? log.timeIn ?? log.date;
+
+    if (!grouped[key]) {
+      grouped[key] = {
+        date: dateKey,
+        name: `${user.firstName} ${user.surname}`,
+        role: user.role,
+        timeIn: null,
+        timeOut: null,
+        status: log.status,
+        _latestTime: logTimestamp,
+      };
+    }
+
+    if (log.reason === 'attendance') {
+      if (log.timeIn) grouped[key].timeIn = log.timeIn;
+      if (log.timeOut) grouped[key].timeOut = log.timeOut;
+    }
+
+    if (logTimestamp > grouped[key]._latestTime) {
+      grouped[key].status = log.status;
+      grouped[key]._latestTime = logTimestamp;
+    }
+  }
+
+  const rows = Object.values(grouped).map((r: any) => ({
+    Date: r.date,
+    Name: r.name,
+    Role: r.role,
+    'Time In': r.timeIn ? r.timeIn.toISOString() : '',
+    'Time Out': r.timeOut ? r.timeOut.toISOString() : '',
+    Status: r.status,
+  }));
+
+  // export
+  const filenameBase = `logs_${start.toISOString().split('T')[0]}_to_${end.toISOString().split('T')[0]}`;
+
+  if (format === 'csv') {
+    const { Parser } = require('json2csv');
+    const parser = new Parser({ fields: ['Date','Name','Role','Time In','Time Out','Status'] });
+    const csv = parser.parse(rows);
+    res.header('Content-Type', 'text/csv');
+    res.attachment(`${filenameBase}.csv`).send(csv);
+    return;
+  }
+
+  if (format === 'xlsx') {
+    const ExcelJS = require('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Logs');
+    sheet.columns = [
+      { header: 'Date', key: 'Date', width: 15 },
+      { header: 'Name', key: 'Name', width: 25 },
+      { header: 'Role', key: 'Role', width: 15 },
+      { header: 'Time In', key: 'Time In', width: 20 },
+      { header: 'Time Out', key: 'Time Out', width: 20 },
+      { header: 'Status', key: 'Status', width: 15 },
+    ];
+
+    rows.forEach(r => sheet.addRow(r));
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.attachment(`${filenameBase}.xlsx`).send(buffer);
+    return;
+  }
+
+  return next(new AppError('Unsupported format', 400));
+});

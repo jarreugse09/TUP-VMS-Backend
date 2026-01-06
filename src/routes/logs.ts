@@ -6,6 +6,7 @@ import {
   getActivities, visitorScanQR,
   scanTransactionQR,
   getStaffLogs,
+  exportLogs,
 } from "../controllers/logController";
 import { authenticateToken, authorizeRoleOrStaffType, authorizeRoles, } from "../middlewares/auth";
 
@@ -31,5 +32,8 @@ router.get("/logs", authenticateToken, authorizeRoles("TUP"), getLogs);
 router.get("/logs/staff/", authenticateToken, authorizeRoles("TUP", "Staff"), getStaffLogs);
 
 router.get("/activities", authenticateToken, getActivities);
+
+// Export endpoint
+router.post("/export", authenticateToken, exportLogs);
 
 export default router;
