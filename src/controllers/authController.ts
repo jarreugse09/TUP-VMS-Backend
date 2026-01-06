@@ -80,7 +80,7 @@ export const login = async (req: Request, res: Response) => {
     res.json({
       token,
       user: {
-        id: user._id,
+        _id: user._id.toString(),
         role: user.role,
         firstName: user.firstName,
         surname: user.surname,

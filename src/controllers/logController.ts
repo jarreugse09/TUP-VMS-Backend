@@ -834,7 +834,7 @@ export const recordActivity = async (req: AuthRequest, res: Response) => {
 export const getLogs = catchAsync(async (req: AuthRequest, res: Response) => {
   const logs = await Log.find()
     .populate("userId", "firstName surname role photoURL birthdate")
-    .sort({ date: 1, timeIn: 1 });
+    .sort({ date: -1, timeIn: -1 });
 
   const grouped: Record<string, any> = {};
 
@@ -886,6 +886,33 @@ export const getLogs = catchAsync(async (req: AuthRequest, res: Response) => {
 
   // remove internal helper field
   const result = Object.values(grouped).map(({ _latestTime, ...rest }) => rest);
+
+  // Fill missing attendance entries by checking Attendance collection for staff users
+  for (const entry of result) {
+    try {
+      if (!entry.attendance && entry.user && entry.user.role === 'Staff') {
+        const start = new Date(entry.date);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(entry.date);
+        end.setHours(23, 59, 59, 999);
+
+        const att = await Attendance.findOne({
+          staffId: entry.user._id,
+          date: { $gte: start, $lte: end },
+        });
+
+        if (att) {
+          entry.attendance = {
+            timeIn: att.timeIn,
+            timeOut: att.timeOut,
+            status: att.timeOut ? 'Checked Out' : 'In TUP',
+          };
+        }
+      }
+    } catch (err) {
+      console.error('Error filling attendance:', err);
+    }
+  }
 
   res.json(result);
 });
@@ -894,7 +921,7 @@ export const getStaffLogs = catchAsync(async (req: AuthRequest, res: Response, n
 
   const logs = await Log.find({ userId: req.user.id })
     .populate("userId", "firstName surname role photoURL birthdate")
-    .sort({ date: 1, timeIn: 1 });
+    .sort({ date: -1, timeIn: -1 });
 
   const grouped: Record<string, any> = {};
 
@@ -946,6 +973,33 @@ export const getStaffLogs = catchAsync(async (req: AuthRequest, res: Response, n
 
   // remove internal helper field
   const result = Object.values(grouped).map(({ _latestTime, ...rest }) => rest);
+
+  // Fill missing attendance entries by checking Attendance collection
+  for (const entry of result) {
+    try {
+      if (!entry.attendance && entry.user && entry.user.role === 'Staff') {
+        const start = new Date(entry.date);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(entry.date);
+        end.setHours(23, 59, 59, 999);
+
+        const att = await Attendance.findOne({
+          staffId: entry.user._id,
+          date: { $gte: start, $lte: end },
+        });
+
+        if (att) {
+          entry.attendance = {
+            timeIn: att.timeIn,
+            timeOut: att.timeOut,
+            status: att.timeOut ? 'Checked Out' : 'In TUP',
+          };
+        }
+      }
+    } catch (err) {
+      console.error('Error filling attendance:', err);
+    }
+  }
 
   res.json(result);
 });
