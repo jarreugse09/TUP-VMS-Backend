@@ -141,6 +141,18 @@ export const scanQR = catchAsync(
       return next(new AppError("User not found", 404));
     }
 
+    // Create a sanitized user object to include in responses (avoid sensitive fields)
+    const safeUser = {
+      _id: user._id,
+      firstName: user.firstName,
+      surname: user.surname,
+      role: user.role,
+      photoURL: user.photoURL,
+      status: user.status,
+      staffType: user.staffType,
+    };
+
+
     // =========================
     // 3. DATE (TODAY ONLY)
     // =========================
@@ -178,7 +190,7 @@ export const scanQR = catchAsync(
         });
 
         await log.save();
-        return res.status(201).json({ message: "Checked In Successfully" })
+        return res.status(201).json({ message: "Checked In Successfully", user: safeUser })
       }
 
       // ---------- CHECK-OUT ----------
@@ -200,7 +212,7 @@ export const scanQR = catchAsync(
         existingLog.status = "Checked Out";
         await existingLog.save();
 
-        return res.status(201).json({ message: "Checked Out Successfully" })
+        return res.status(201).json({ message: "Checked Out Successfully", user: safeUser })
       }
     }
 
@@ -259,6 +271,7 @@ export const scanQR = catchAsync(
             message: "Attendance check-in successful",
             attendance: newAttend,
             log: newLog,
+            user: safeUser,
           });
         }
 
@@ -281,7 +294,8 @@ export const scanQR = catchAsync(
 
             return res.status(200).json({
               message: "Check-in successful",
-              log: existingLog
+              log: existingLog,
+              user: safeUser,
             });
           } else {
             // Create new log
@@ -335,6 +349,7 @@ export const scanQR = catchAsync(
             return res.status(201).json({
               message: "Break check-in successful",
               log: newLog,
+              user: safeUser,
             });
           }
         }
@@ -386,6 +401,7 @@ export const scanQR = catchAsync(
           return res.status(201).json({
             status: "success",
             message: "Check out successful.",
+            user: safeUser,
           });
         }
         else if (reason === 'break') {
@@ -409,6 +425,7 @@ export const scanQR = catchAsync(
           return res.status(201).json({
             status: "success",
             message: "Check out successful.",
+            user: safeUser,
           });
 
         }
