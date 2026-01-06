@@ -6,6 +6,7 @@ import { generateQRString } from "../utils/qrUtils";
 
 interface AuthRequest extends Request {
   user?: any;
+  file?: any;
 }
 
 export const getProfile = async (req: AuthRequest, res: Response) => {
@@ -24,7 +25,7 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
 };
 
 export const requestQRChange = async (req: AuthRequest, res: Response) => {
-  const { reason } = req.body;
+  const { reason, newQRString } = req.body;
 
   try {
     const user = await User.findById(req.user.id);
@@ -37,10 +38,20 @@ export const requestQRChange = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: "QR code not found" });
     }
 
+    // Require either a newQRString or an uploaded image to accept a change request
+    if (!newQRString && !req.file) {
+      return res.status(400).json({ message: "Please provide a new QR string or upload an image" });
+    }
+
+    const path = require("path");
+    const relPath = req.file ? path.relative(process.cwd(), req.file.path).replace(/\\/g, "/") : undefined;
+
     const request = new QRRequest({
       userId: user._id,
       oldQR: qrCode.qrString,
       reason,
+      newQRString: newQRString || undefined,
+      newQRImage: relPath ? `/${relPath}` : undefined,
     });
 
     await request.save();
@@ -77,10 +88,10 @@ export const approveQRRequest = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: "QR code not found" });
     }
 
-    // Generate new QR
-    const newQRString = generateQRString(
-      (await User.findById(request.userId))!.role
-    );
+    // Use the user's supplied QR string if present, otherwise generate a new one
+    const userObj = await User.findById(request.userId);
+    const newQRString = request.newQRString || generateQRString(userObj!.role);
+
     qrCode.qrString = newQRString;
     qrCode.updatedAt = new Date();
     await qrCode.save();
@@ -90,6 +101,25 @@ export const approveQRRequest = async (req: AuthRequest, res: Response) => {
     await request.save();
 
     res.json({ message: "QR change approved" });
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const rejectQRRequest = async (req: AuthRequest, res: Response) => {
+  const { requestId } = req.params;
+
+  try {
+    const request = await QRRequest.findById(requestId);
+    if (!request) {
+      return res.status(404).json({ message: "Request not found" });
+    }
+
+    request.status = "Rejected";
+    request.approvedBy = req.user.id; // record who rejected
+    await request.save();
+
+    res.json({ message: "QR change request rejected" });
   } catch (error) {
     res.status(500).json({ message: "Server error" });
   }

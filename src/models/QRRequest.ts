@@ -5,6 +5,8 @@ export interface IQRRequest extends Document {
   userId: mongoose.Types.ObjectId;
   oldQR: string;
   reason: string;
+  newQRString?: string;
+  newQRImage?: string;
   status: "Pending" | "Approved" | "Rejected";
   approvedBy?: mongoose.Types.ObjectId;
   createdAt: Date;
@@ -14,6 +16,8 @@ const QRRequestSchema: Schema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
   oldQR: { type: String, required: true },
   reason: { type: String, required: true },
+  newQRString: { type: String },
+  newQRImage: { type: String },
   status: {
     type: String,
     enum: ["Pending", "Approved", "Rejected"],
