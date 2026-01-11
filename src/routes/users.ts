@@ -8,6 +8,7 @@ import {
   getQRRequests,
   approveQRRequest,
   rejectQRRequest,
+  getAllUsers,
 } from "../controllers/userController";
 import { authenticateToken, authorizeRoles } from "../middlewares/auth";
 
@@ -25,6 +26,8 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
+
+router.get("/admin/", authenticateToken, getAllUsers)
 router.get("/profile", authenticateToken, getProfile);
 router.post("/request-qr-change", authenticateToken, upload.single("newQRImage"), requestQRChange);
 router.get(

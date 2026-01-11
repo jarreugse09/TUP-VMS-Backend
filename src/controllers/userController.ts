@@ -1,9 +1,9 @@
-import { Request, Response } from "express";
+import { Request, Response, type NextFunction } from "express";
 import User from "../models/User";
 import QRCode from "../models/QRCode";
 import QRRequest from "../models/QRRequest";
 import { generateQRString } from "../utils/qrUtils";
-
+import { catchAsync } from "../utils/catchAsync";
 interface AuthRequest extends Request {
   user?: any;
   file?: any;
@@ -124,3 +124,30 @@ export const rejectQRRequest = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+
+export const getAllUsers = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+  const { role, name, startDate, endDate } = req.query;
+
+  // Build query
+  const query: any = {};
+
+  if (role) query.role = role;
+  if (name) {
+    query.$or = [
+      { firstName: { $regex: new RegExp(name as string, "i") } },
+      { surname: { $regex: new RegExp(name as string, "i") } },
+    ];
+  }
+  if (startDate || endDate) {
+    query.createdAt = {};
+    if (startDate) query.createdAt.$gte = new Date(startDate as string);
+    if (endDate) query.createdAt.$lte = new Date(endDate as string);
+  }
+
+  const users = await User.find(query)
+    .select("_id firstName surname birthdate role status photoURL createdAt")
+    .lean();
+
+  res.status(200).json(users);
+});
