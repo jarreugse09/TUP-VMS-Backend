@@ -1,0 +1,180 @@
+import { Request, Response } from "express";
+import User from "../models/User";
+import Log from "../models/Log";
+import Attendance from "../models/Attendance";
+
+export const getAnalyticsOverview = async (req: Request, res: Response) => {
+    try {
+        // parse startDate / endDate from query params
+        let { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+
+        const start = startDate ? new Date(startDate) : new Date();
+        const end = endDate ? new Date(endDate) : new Date();
+
+        // normalize time
+        start.setHours(0, 0, 0, 0);
+        end.setHours(23, 59, 59, 999);
+
+        /* ================================
+           VISITOR ANALYTICS
+        ================================= */
+
+        const visitorIds = await User.find({ role: "Visitor" }).distinct("_id");
+
+        // TOTAL VISITORS
+        const [result] = await Log.aggregate([
+            {
+                $match: {
+                    userId: { $in: visitorIds },
+                    date: { $gte: start, $lte: end },
+                },
+            },
+            {
+                $count: "total",
+            },
+        ]);
+
+        const totalVisitors = result?.total || 0;
+
+
+
+        const visitorCheckedOutCount = await Log.countDocuments({
+            userId: { $in: visitorIds },
+            date: { $gte: start, $lte: end },
+            timeOut: { $ne: null },
+        });
+
+        const visitorCurrentlyInside = await Log.countDocuments({
+            userId: { $in: visitorIds },
+            timeIn: { $ne: null }, date: { $gte: start, $lte: end },
+            timeOut: null,
+        });
+
+
+
+        // AVERAGE VISIT DURATION
+        // Average visitors per hour
+        const hourlyCounts = await Log.aggregate([
+            {
+                $match: {
+                    userId: { $in: visitorIds },
+                    timeIn: { $ne: null },
+                    date: { $gte: start, $lte: end },
+                },
+            },
+            {
+                $project: {
+                    hour: { $hour: "$timeIn" },
+                    date: 1,
+                },
+            },
+            {
+                $group: {
+                    _id: { day: { $dateToString: { format: "%Y-%m-%d", date: "$date" } }, hour: "$hour" },
+                    count: { $sum: 1 },
+                },
+            },
+        ]);
+
+        // Compute average per hour across the period
+        const hoursMap: Record<number, number[]> = {}; // hour -> array of daily counts
+
+        hourlyCounts.forEach(item => {
+            const hour = item._id.hour;
+            if (!hoursMap[hour]) hoursMap[hour] = [];
+            hoursMap[hour].push(item.count);
+        });
+
+        const avgPerHour: { _id: number; hour: number; avgCount: number }[] = Object.entries(hoursMap).map(
+            ([hour, counts]) => ({
+                _id: Number(hour),           // use hour as the _id
+                hour: Number(hour),
+                avgCount: counts.reduce((a, b) => a + b, 0) / counts.length,
+            })
+        );
+
+
+        // Average VISITORS PER DAY
+        const dailyVisitors = await Log.aggregate([
+            {
+                $match: {
+                    userId: { $in: visitorIds },
+                    date: { $gte: start, $lte: end },
+                },
+            },
+            {
+                $group: {
+                    _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+                    count: { $sum: 1 },
+                },
+            },
+            { $sort: { _id: 1 } },
+        ]);
+
+        // 2. Compute average
+        const averageVisitorsPerDay =
+            dailyVisitors.length > 0 ? totalVisitors / dailyVisitors.length : 0;
+
+
+
+        /* ================================
+           STAFF ATTENDANCE
+        ================================= */
+
+        const staffIds = await User.find({ role: "Staff" }).distinct("_id");
+
+        const totalPresentToday = await Attendance.countDocuments({
+            staffId: { $in: staffIds },
+            date: { $gte: start, $lte: end },
+            timeIn: { $ne: null },
+        });
+
+        const checkedOutCount = await Attendance.countDocuments({
+            staffId: { $in: staffIds },
+            date: { $gte: start, $lte: end },
+            timeOut: { $ne: null },
+        });
+
+        const currentlyInside = await Attendance.countDocuments({
+            staffId: { $in: staffIds },
+            timeIn: { $ne: null }, date: { $gte: start, $lte: end },
+            timeOut: null,
+        });
+
+        const dailyAttendance = await Attendance.aggregate([
+            { $match: { staffId: { $in: staffIds }, date: { $gte: start, $lte: end } } },
+            {
+                $group: {
+                    _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+                    present: { $sum: { $cond: [{ $ne: ["$timeIn", null] }, 1, 0] } },
+                    checkedOut: { $sum: { $cond: [{ $ne: ["$timeOut", null] }, 1, 0] } },
+                },
+            },
+            { $sort: { _id: 1 } },
+        ]);
+
+        /* ================================
+           RESPONSE
+        ================================= */
+
+        res.status(200).json({
+            visitors: {
+                totals: totalVisitors,
+                averageVisitorPerHour: avgPerHour || [],
+                visitorCheckedOut: visitorCheckedOutCount,
+                vistorCheckedIn: visitorCurrentlyInside,
+                avgVisitorperDay: averageVisitorsPerDay,
+
+            },
+            attendance: {
+                totalPresentToday,
+                checkedOutCount,
+                currentlyInside,
+                dailyAttendance,
+            },
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Analytics computation failed" });
+    }
+};
