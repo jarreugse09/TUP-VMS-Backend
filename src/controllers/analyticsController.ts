@@ -154,24 +154,106 @@ export const getAnalyticsOverview = async (req: Request, res: Response) => {
         ]);
 
         /* ================================
-           RESPONSE
+           BUILD ROLES SUMMARY & COMBINED DAILY
         ================================= */
 
-        res.status(200).json({
-            visitors: {
-                totals: totalVisitors,
-                averageVisitorPerHour: avgPerHour || [],
-                visitorCheckedOut: visitorCheckedOutCount,
-                vistorCheckedIn: visitorCurrentlyInside,
-                avgVisitorperDay: averageVisitorsPerDay,
+        // roles array
+        const roles = ["Student", "Staff", "Visitor", "TUP"];
 
-            },
-            attendance: {
-                totalPresentToday,
-                checkedOutCount,
-                currentlyInside,
-                dailyAttendance,
-            },
+        // helper to get date keys from dailyAttendance / visitor daily
+        const dateKeys = Array.from(new Set([
+            ...dailyAttendance.map((d: any) => d._id),
+            ...dailyVisitors.map((d: any) => d._id),
+        ])).sort();
+
+        // prepare result per role
+        const rolesSummary: Record<string, any> = {};
+
+        for (const role of roles) {
+            const ids = await User.find({ role }).distinct("_id");
+
+            if (role === "Staff") {
+                const usersCurrentlyInside = await Attendance.countDocuments({
+                    staffId: { $in: ids },
+                    date: { $gte: start, $lte: end },
+                    timeIn: { $ne: null },
+                    timeOut: null,
+                });
+
+                const usersCheckedOut = await Attendance.countDocuments({
+                    staffId: { $in: ids },
+                    date: { $gte: start, $lte: end },
+                    timeOut: { $ne: null },
+                });
+
+                const daily = await Attendance.aggregate([
+                    { $match: { staffId: { $in: ids }, date: { $gte: start, $lte: end } } },
+                    {
+                        $group: {
+                            _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+                            count: { $sum: { $cond: [{ $ne: ["$timeIn", null] }, 1, 0] } },
+                        },
+                    },
+                    { $sort: { _id: 1 } },
+                ]);
+
+                const map = new Map(daily.map((d: any) => [d._id, d.count]));
+
+                rolesSummary[role] = {
+                    totalUsers: await User.countDocuments({ role }),
+                    usersCurrentlyInside,
+                    usersCheckedOut,
+                    dailyCounts: dateKeys.map((d) => ({ _id: d, count: map.get(d) || 0 })),
+                };
+            } else {
+                const usersCurrentlyInside = await Log.countDocuments({
+                    userId: { $in: ids },
+                    date: { $gte: start, $lte: end },
+                    timeIn: { $ne: null },
+                    timeOut: null,
+                });
+
+                const usersCheckedOut = await Log.countDocuments({
+                    userId: { $in: ids },
+                    date: { $gte: start, $lte: end },
+                    timeOut: { $ne: null },
+                });
+
+                const daily = await Log.aggregate([
+                    { $match: { userId: { $in: ids }, date: { $gte: start, $lte: end }, timeIn: { $ne: null } } },
+                    {
+                        $group: {
+                            _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+                            count: { $sum: 1 },
+                        },
+                    },
+                    { $sort: { _id: 1 } },
+                ]);
+
+                const map = new Map(daily.map((d: any) => [d._id, d.count]));
+
+                rolesSummary[role] = {
+                    totalUsers: await User.countDocuments({ role }),
+                    usersCurrentlyInside,
+                    usersCheckedOut,
+                    dailyCounts: dateKeys.map((d) => ({ _id: d, count: map.get(d) || 0 })),
+                };
+            }
+        }
+
+        // built combinedDaily using dateKeys
+        const combinedDaily = dateKeys.map((d) => {
+            const row: any = { _id: d };
+            for (const role of roles) {
+                row[role] = rolesSummary[role].dailyCounts.find((x: any) => x._id === d)?.count || 0;
+            }
+            return row;
+        });
+
+        res.status(200).json({
+            roles: rolesSummary,
+            combinedDaily,
+            dateRange: dateKeys,
         });
     } catch (error) {
         console.error(error);
