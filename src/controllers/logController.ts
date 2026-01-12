@@ -841,6 +841,10 @@ export const getLogs = catchAsync(async (req: AuthRequest, res: Response) => {
   for (const log of logs) {
     const dateKey = log.date.toISOString().split("T")[0];
     const user = log.userId as any;
+    if (!user || !user._id) {
+      console.warn('Skipping log with missing user reference', log._id);
+      continue;
+    }
     const key = `${user._id}-${dateKey}`;
 
     // choose the most accurate timestamp for ordering
@@ -929,6 +933,10 @@ export const getStaffLogs = catchAsync(async (req: AuthRequest, res: Response, n
   for (const log of logs) {
     const dateKey = log.date.toISOString().split("T")[0];
     const user = log.userId as any;
+    if (!user || !user._id) {
+      console.warn('Skipping log with missing user reference', log._id);
+      continue;
+    }
     const key = `${user._id}-${dateKey}`;
 
     // choose the most accurate timestamp for ordering
@@ -1066,6 +1074,10 @@ export const exportLogs = catchAsync(async (req: AuthRequest, res: Response, nex
   for (const log of logs) {
     const dateKey = log.date.toISOString().split('T')[0];
     const user = log.userId as any;
+    if (!user || !user._id) {
+      console.warn('Skipping log with missing user reference', log._id);
+      continue;
+    }
     const key = `${user._id}-${dateKey}`;
     const logTimestamp = log.timeOut ?? log.timeIn ?? log.date;
 
