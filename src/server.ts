@@ -18,26 +18,17 @@ const PORT = process.env.PORT || 5000;
 app.set("trust proxy", 1);
 
 // === 2️⃣ CORS configuration ===
-const allowedOrigins = [
-  process.env.FRONTEND_URL, // your main frontend URL
-  "http://localhost:5173",   // local frontend dev URL
-];
+const allowedOrigin = (process.env.FRONTEND_URL || "").replace(/\/$/, "");
 
 const corsOptions = {
-  origin: (origin: string | undefined, callback: any) => {
-    // allow requests with no origin (like Postman)
-    if (!origin) return callback(null, true);
-
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    } else {
-      return callback(new Error(`Not allowed by CORS: ${origin}`));
-    }
-  },
+  origin: allowedOrigin, // must match frontend exactly
   credentials: true,
+  methods: ["GET","POST","PUT","DELETE","PATCH","OPTIONS"],
+  allowedHeaders: ["Content-Type","Authorization"]
 };
 
 app.use(cors(corsOptions));
+app.options("*", cors(corsOptions)); // handle preflight for all routes
 
 // === 3️⃣ Body parsers ===
 app.use(express.json());
