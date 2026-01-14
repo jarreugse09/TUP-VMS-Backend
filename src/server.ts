@@ -1,6 +1,6 @@
 import express, { Request, Response } from "express";
 import mongoose from "mongoose";
-import cors from "cors";
+import cors, { CorsOptions } from "cors";
 import dotenv from "dotenv";
 
 import analyticsRoute from './routes/analytics';
@@ -18,12 +18,24 @@ const PORT = process.env.PORT || 5000;
 app.set("trust proxy", 1);
 
 // === 2️⃣ CORS configuration ===
-const corsOptions = {
-  origin: process.env.FRONTEND_URL || '*', // frontend URL in production
+const corsOptions: CorsOptions = {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    // Remove trailing slash from FRONTEND_URL
+    const allowedOrigin = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
+
+    if (!origin || origin === allowedOrigin) {
+      // allow requests with no origin (like Postman) or matching origin
+      callback(null, true);
+    } else {
+      callback(new Error(`Not allowed by CORS: ${origin}`));
+    }
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 };
+
+// Then apply it to your app
 app.use(cors(corsOptions));
 
 // === 3️⃣ Body parsers ===
