@@ -19,29 +19,26 @@ app.set("trust proxy", 1);
 
 // === 2️⃣ CORS configuration ===
 const allowedOrigins = [
-  (process.env.FRONTEND_URL || '').replace(/\/$/, ''), // frontend
-  'http://localhost:3000', // local dev frontend
+  process.env.FRONTEND_URL, // your frontend Vercel URL
+  'http://localhost:3000',   // local dev
 ];
 
 const corsOptions: CorsOptions = {
-  origin: (origin: string | undefined, callback) => {
-    // allow requests with no origin (Postman, mobile apps)
-    if (!origin) return callback(null, true);
-
-    const normalizedOrigin = origin.replace(/\/$/, '');
-
-    if (allowedOrigins.includes(normalizedOrigin)) {
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error(`Not allowed by CORS: ${origin}`));
     }
   },
   credentials: true,
-  methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
+
 app.use(cors(corsOptions));
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok" });
+});
 
 
 // Then apply it to your app
