@@ -70,7 +70,7 @@ export const register = async (req: Request, res: Response) => {
 export const login = async (req: Request, res: Response) => {
   try {
     // Log the request body for debugging on Render
-    console.log("REQ BODY:", req.body);
+    // console.log("REQ BODY:", req.body);
 
     // Normalize email
     const email = req.body.email?.trim().toLowerCase();
