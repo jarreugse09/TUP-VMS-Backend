@@ -1,6 +1,6 @@
 import express, { Request, Response } from "express";
 import mongoose from "mongoose";
-import cors, { CorsOptions } from "cors";
+import cors from "cors";
 import dotenv from "dotenv";
 
 import analyticsRoute from './routes/analytics';
@@ -19,29 +19,24 @@ app.set("trust proxy", 1);
 
 // === 2️⃣ CORS configuration ===
 const allowedOrigins = [
-  process.env.FRONTEND_URL, // your frontend Vercel URL
-  'http://localhost:3000',   // local dev
+  process.env.FRONTEND_URL, // your main frontend URL
+  "http://localhost:5173",   // local frontend dev URL
 ];
 
-const corsOptions: CorsOptions = {
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
+const corsOptions = {
+  origin: (origin: string | undefined, callback: any) => {
+    // allow requests with no origin (like Postman)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
     } else {
-      callback(new Error(`Not allowed by CORS: ${origin}`));
+      return callback(new Error(`Not allowed by CORS: ${origin}`));
     }
   },
   credentials: true,
 };
 
-
-app.use(cors(corsOptions));
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok" });
-});
-
-
-// Then apply it to your app
 app.use(cors(corsOptions));
 
 // === 3️⃣ Body parsers ===
