@@ -18,13 +18,19 @@ const PORT = process.env.PORT || 5000;
 app.set("trust proxy", 1);
 
 // === 2️⃣ CORS configuration ===
-const corsOptions: CorsOptions = {
-  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-    // Remove trailing slash from FRONTEND_URL
-    const allowedOrigin = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
+const allowedOrigins = [
+  (process.env.FRONTEND_URL || '').replace(/\/$/, ''), // frontend
+  'http://localhost:3000', // local dev frontend
+];
 
-    if (!origin || origin === allowedOrigin) {
-      // allow requests with no origin (like Postman) or matching origin
+const corsOptions: CorsOptions = {
+  origin: (origin: string | undefined, callback) => {
+    // allow requests with no origin (Postman, mobile apps)
+    if (!origin) return callback(null, true);
+
+    const normalizedOrigin = origin.replace(/\/$/, '');
+
+    if (allowedOrigins.includes(normalizedOrigin)) {
       callback(null, true);
     } else {
       callback(new Error(`Not allowed by CORS: ${origin}`));
@@ -34,6 +40,9 @@ const corsOptions: CorsOptions = {
   methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
+
+app.use(cors(corsOptions));
+
 
 // Then apply it to your app
 app.use(cors(corsOptions));
