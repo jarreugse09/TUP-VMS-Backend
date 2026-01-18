@@ -19,4 +19,7 @@ const ActivitySchema: Schema = new Schema({
   timestamp: { type: Date, default: Date.now },
 });
 
+// Performance indexes
+ActivitySchema.index({ fromUserId: 1, timestamp: -1 });
+
 export default mongoose.model<IActivity>("Activity", ActivitySchema);

@@ -35,4 +35,7 @@ const UserSchema: Schema = new Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+// Performance indexes
+UserSchema.index({ role: 1 });
+
 export default mongoose.model<IUser>("User", UserSchema);

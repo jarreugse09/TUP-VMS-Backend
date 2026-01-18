@@ -21,10 +21,19 @@ const LogSchema: Schema = new Schema({
   date: { type: Date, required: true },
   timeIn: { type: Date, default: null },
   timeOut: { type: Date, default: null },
-  status: { type: String, enum: ["In TUP", "Checked Out", 'Transaction'], required: true },
+  status: {
+    type: String,
+    enum: ["In TUP", "Checked Out", "Transaction"],
+    required: true,
+  },
   reason: { type: String, default: null },
   scannedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
   approvedBy: { type: String },
 });
+
+// Performance indexes
+LogSchema.index({ userId: 1, date: -1 });
+LogSchema.index({ date: -1, reason: 1 });
+LogSchema.index({ status: 1 });
 
 export default mongoose.model<ILog>("Log", LogSchema);

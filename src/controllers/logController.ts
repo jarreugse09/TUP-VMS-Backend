@@ -112,11 +112,9 @@ export const scanQR = async (req: AuthRequest, res: Response) => {
 };
 */
 
-
 // ADMIN and security scan
 export const scanQR = catchAsync(
   async (req: AuthRequest, res: Response, next: NextFunction) => {
-
     // =========================
     // 1. REQUEST VALIDATION
     // =========================
@@ -152,7 +150,6 @@ export const scanQR = catchAsync(
       staffType: user.staffType,
     };
 
-
     // =========================
     // 3. DATE (TODAY ONLY)
     // =========================
@@ -163,10 +160,8 @@ export const scanQR = catchAsync(
     // 4. STUDENT / VISITOR FLOW
     // =====================================================
     if (user.role === "Student" || user.role === "Visitor") {
-
       // ---------- CHECK-IN ----------
       if (mode === "checkin") {
-
         // Check if already checked in today (scanned by guard/admin)
         const existingLog = await Log.findOne({
           userId: user._id,
@@ -185,17 +180,18 @@ export const scanQR = catchAsync(
           date: new Date(),
           timeIn: new Date(),
           status: "In TUP",
-          reason: 'transaction',
+          reason: "transaction",
           scannedBy: req.user.id,
         });
 
         await log.save();
-        return res.status(201).json({ message: "Checked In Successfully", user: safeUser })
+        return res
+          .status(201)
+          .json({ message: "Checked In Successfully", user: safeUser });
       }
 
       // ---------- CHECK-OUT ----------
       else if (mode === "checkout") {
-
         // Find active check-in
         const existingLog = await Log.findOne({
           userId: user._id,
@@ -212,7 +208,9 @@ export const scanQR = catchAsync(
         existingLog.status = "Checked Out";
         await existingLog.save();
 
-        return res.status(201).json({ message: "Checked Out Successfully", user: safeUser })
+        return res
+          .status(201)
+          .json({ message: "Checked Out Successfully", user: safeUser });
       }
     }
 
@@ -220,15 +218,12 @@ export const scanQR = catchAsync(
     // 5. STAFF / TUP FLOW
     // =====================================================
     else if (user.role === "Staff" || user.role === "TUP") {
-
       // ======================
       // CHECK-IN MODE
       // ======================
       if (mode === "checkin") {
-
         // ---------- ATTENDANCE ----------
         if (reason === "attendance") {
-
           // Check existing attendance
           const attend = await Attendance.findOne({
             staffId: user._id,
@@ -277,12 +272,11 @@ export const scanQR = catchAsync(
 
         // ---------- BREAK / GO OUT (RETURN) ----------
         else if (reason === "go out") {
-
           // Check latest checked-out log with same reason
           const existingLog = await Log.findOne({
             userId: user._id,
             status: "Checked Out",
-            reason: 'go out',
+            reason: "go out",
             timeOut: { $gte: today },
           });
 
@@ -314,10 +308,7 @@ export const scanQR = catchAsync(
               return next(new AppError("New Log creation failed.", 400));
             }
           }
-        }
-
-        else if (reason === "break") {
-
+        } else if (reason === "break") {
           const existingLog = await Log.findOne({
             userId: user._id,
             status: "Checked Out",
@@ -352,20 +343,17 @@ export const scanQR = catchAsync(
               user: safeUser,
             });
           }
+        } else {
+          return next(new AppError("Invalid reason", 500));
         }
-        else { return next(new AppError("Invalid reason", 500)); }
-
-
       }
 
       // ======================
       // CHECK-OUT MODE
       // ======================
       else if (mode === "checkout") {
-
         // ---------- ATTENDANCE CHECKOUT ----------
         if (reason === "attendance") {
-
           // Find active attendance log
           const log = await Log.findOne({
             userId: user._id,
@@ -403,10 +391,7 @@ export const scanQR = catchAsync(
             message: "Check out successful.",
             user: safeUser,
           });
-        }
-        else if (reason === 'break') {
-
-
+        } else if (reason === "break") {
           const newLog = await Log.create({
             userId: user._id,
             qrId: qrCode._id,
@@ -427,20 +412,17 @@ export const scanQR = catchAsync(
             message: "Check out successful.",
             user: safeUser,
           });
-
         }
         // ---------- GO OUT ----------
         else if (reason === "go out") {
-
           // MAINTENANCE / STARCOM
           if (user.role === "Staff" && user.staffType === "Maintenance") {
-
             if (!approvedBy) {
               return next(
                 new AppError(
                   "Please provide the person who approved to go out.",
-                  404
-                )
+                  404,
+                ),
               );
             }
 
@@ -486,24 +468,19 @@ export const scanQR = catchAsync(
               message: "Check out successful.",
             });
           }
+        } else {
+          return next(new AppError("Invalid reason", 500));
         }
-
-        else { return next(new AppError("Invalid reason", 500)); }
-
-
       }
     }
-  }
+  },
 );
-
-
 
 // ================================
 // STAFF ↔ STAFF TRANSACTION SCAN
 // ================================
 export const scanTransactionQR = catchAsync(
   async (req: AuthRequest, res: Response, next: NextFunction) => {
-
     // =========================
     // 1. REQUEST VALIDATION
     // =========================
@@ -546,11 +523,10 @@ export const scanTransactionQR = catchAsync(
     // 5. CHECK-IN TRANSACTION
     // =====================================================
     if (mode === "checkin" && type === "Transaction") {
-
       // Look for existing transaction log today
       const existingLog = await Log.findOne({
-        userId: req.user.id,        // staff who scanned
-        transId: user._id,           // staff being scanned
+        userId: req.user.id, // staff who scanned
+        transId: user._id, // staff being scanned
         qrId: qrCode.id,
         status: "Transaction",
         reason: type,
@@ -567,8 +543,8 @@ export const scanTransactionQR = catchAsync(
 
       // Always create a new transaction log (as per current logic)
       const newLog = await Log.create({
-        userId: req.user.id,        // staff who scanned
-        transId: user._id,           // staff scanned
+        userId: req.user.id, // staff who scanned
+        transId: user._id, // staff scanned
         qrId: qrCode.id,
         status: type,
         reason: type,
@@ -579,9 +555,7 @@ export const scanTransactionQR = catchAsync(
       });
 
       if (!newLog) {
-        return next(
-          new AppError("Error Transaction. Please try again", 404)
-        );
+        return next(new AppError("Error Transaction. Please try again", 404));
       }
 
       return res.status(201).json({
@@ -594,11 +568,10 @@ export const scanTransactionQR = catchAsync(
     // 6. CHECK-OUT TRANSACTION
     // =====================================================
     else if (mode === "checkout" && type === "Transaction") {
-
       // Look for existing active transaction log today
       const existingLog = await Log.findOne({
-        userId: req.user.id,        // staff who scanned
-        transId: user._id,           // staff scanned
+        userId: req.user.id, // staff who scanned
+        transId: user._id, // staff scanned
         qrId: qrCode.id,
         status: "Transaction",
         reason: type,
@@ -627,9 +600,7 @@ export const scanTransactionQR = catchAsync(
       });
 
       if (!newLog) {
-        return next(
-          new AppError("Error Transaction. Please try again", 404)
-        );
+        return next(new AppError("Error Transaction. Please try again", 404));
       }
 
       return res.status(201).json({
@@ -637,17 +608,14 @@ export const scanTransactionQR = catchAsync(
         message: "Transaction check-out.",
       });
     }
-  }
+  },
 );
-
-
 
 // =========================================
 // VISITOR / STUDENT → STAFF TRANSACTION SCAN
 // =========================================
 export const visitorScanQR = catchAsync(
   async (req: AuthRequest, res: Response, next: NextFunction) => {
-
     // =========================
     // 1. REQUEST VALIDATION
     // =========================
@@ -690,11 +658,10 @@ export const visitorScanQR = catchAsync(
     // 5. CHECK-IN TRANSACTION
     // =====================================================
     if (mode === "checkin" && type === "Transaction") {
-
       // Look for an existing transaction log today
       const existingLog = await Log.findOne({
-        userId: req.user.id,       // visitor/student who scanned
-        transId: user._id,          // staff being scanned
+        userId: req.user.id, // visitor/student who scanned
+        transId: user._id, // staff being scanned
         qrId: qrCode.id,
         status: "Transaction",
         reason: type,
@@ -723,9 +690,7 @@ export const visitorScanQR = catchAsync(
       });
 
       if (!newLog) {
-        return next(
-          new AppError("Error Transaction. Please try again", 404)
-        );
+        return next(new AppError("Error Transaction. Please try again", 404));
       }
 
       return res.status(201).json({
@@ -738,11 +703,10 @@ export const visitorScanQR = catchAsync(
     // 6. CHECK-OUT TRANSACTION
     // =====================================================
     else if (mode === "checkout" && type === "Transaction") {
-
       // Look for an active transaction log today
       const existingLog = await Log.findOne({
-        userId: req.user._id,       // visitor/student who scanned
-        transId: user._id,          // staff being scanned
+        userId: req.user._id, // visitor/student who scanned
+        transId: user._id, // staff being scanned
         qrId: qrCode.id,
         status: "Transaction",
         reason: type,
@@ -771,9 +735,7 @@ export const visitorScanQR = catchAsync(
       });
 
       if (!newLog) {
-        return next(
-          new AppError("Error Transaction. Please try again", 404)
-        );
+        return next(new AppError("Error Transaction. Please try again", 404));
       }
 
       return res.status(201).json({
@@ -781,9 +743,8 @@ export const visitorScanQR = catchAsync(
         message: "Transaction check-out.",
       });
     }
-  }
+  },
 );
-
 
 export const recordActivity = async (req: AuthRequest, res: Response) => {
   const { toQR, activityType } = req.body;
@@ -830,11 +791,15 @@ export const recordActivity = async (req: AuthRequest, res: Response) => {
 //   }
 // };
 
-
 export const getLogs = catchAsync(async (req: AuthRequest, res: Response) => {
   const logs = await Log.find()
-    .populate("userId", "firstName surname role photoURL birthdate")
-    .sort({ date: -1, timeIn: -1 });
+    .populate({
+      path: "userId",
+      select: "firstName surname role photoURL birthdate",
+      options: { lean: true },
+    })
+    .sort({ date: -1, timeIn: -1 })
+    .lean();
 
   const grouped: Record<string, any> = {};
 
@@ -842,16 +807,13 @@ export const getLogs = catchAsync(async (req: AuthRequest, res: Response) => {
     const dateKey = log.date.toISOString().split("T")[0];
     const user = log.userId as any;
     if (!user || !user._id) {
-      console.warn('Skipping log with missing user reference', log._id);
+      console.warn("Skipping log with missing user reference", log._id);
       continue;
     }
     const key = `${user._id}-${dateKey}`;
 
     // choose the most accurate timestamp for ordering
-    const logTimestamp =
-      log.timeOut ??
-      log.timeIn ??
-      log.date;
+    const logTimestamp = log.timeOut ?? log.timeIn ?? log.date;
 
     if (!grouped[key]) {
       grouped[key] = {
@@ -892,127 +854,158 @@ export const getLogs = catchAsync(async (req: AuthRequest, res: Response) => {
   // remove internal helper field
   const result = Object.values(grouped).map(({ _latestTime, ...rest }) => rest);
 
-  // Fill missing attendance entries by checking Attendance collection for staff users
-  for (const entry of result) {
-    try {
-      if (!entry.attendance && entry.user && entry.user.role === 'Staff') {
-        const start = new Date(entry.date);
-        start.setHours(0, 0, 0, 0);
-        const end = new Date(entry.date);
-        end.setHours(23, 59, 59, 999);
+  // Prefetch attendance for staff users to avoid N+1 queries
+  const staffIds = Array.from(
+    new Set(
+      result
+        .filter((e: any) => e.user && e.user.role === "Staff")
+        .map((e: any) => e.user._id.toString()),
+    ),
+  );
 
-        const att = await Attendance.findOne({
-          staffId: entry.user._id,
-          date: { $gte: start, $lte: end },
-        });
+  if (staffIds.length) {
+    const minDate = new Date(
+      Math.min(...result.map((e: any) => new Date(e.date).getTime())),
+    );
+    minDate.setHours(0, 0, 0, 0);
+    const maxDate = new Date(
+      Math.max(...result.map((e: any) => new Date(e.date).getTime())),
+    );
+    maxDate.setHours(23, 59, 59, 999);
 
-        if (att) {
+    const attends = await Attendance.find({
+      staffId: { $in: staffIds },
+      date: { $gte: minDate, $lte: maxDate },
+    }).lean();
+
+    const attMap = new Map<string, any>();
+    for (const a of attends) {
+      const key = `${(a.staffId as any).toString()}-${new Date(a.date).toISOString().split("T")[0]}`;
+      attMap.set(key, a);
+    }
+
+    for (const entry of result) {
+      if (!entry.attendance && entry.user && entry.user.role === "Staff") {
+        const k = `${entry.user._id.toString()}-${new Date(entry.date).toISOString().split("T")[0]}`;
+        const a = attMap.get(k);
+        if (a) {
           entry.attendance = {
-            timeIn: att.timeIn,
-            timeOut: att.timeOut,
-            status: att.timeOut ? 'Checked Out' : 'In TUP',
+            timeIn: a.timeIn,
+            timeOut: a.timeOut,
+            status: a.timeOut ? "Checked Out" : "In TUP",
           };
         }
       }
-    } catch (err) {
-      console.error('Error filling attendance:', err);
     }
   }
 
   res.json(result);
 });
 
-export const getStaffLogs = catchAsync(async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const getStaffLogs = catchAsync(
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    const logs = await Log.find({ userId: req.user.id })
+      .populate({
+        path: "userId",
+        select: "firstName surname role photoURL birthdate",
+        options: { lean: true },
+      })
+      .sort({ date: -1, timeIn: -1 })
+      .lean();
 
-  const logs = await Log.find({ userId: req.user.id })
-    .populate("userId", "firstName surname role photoURL birthdate")
-    .sort({ date: -1, timeIn: -1 });
+    const grouped: Record<string, any> = {};
 
-  const grouped: Record<string, any> = {};
+    for (const log of logs) {
+      const dateKey = log.date.toISOString().split("T")[0];
+      const user = log.userId as any;
+      if (!user || !user._id) {
+        console.warn("Skipping log with missing user reference", log._id);
+        continue;
+      }
+      const key = `${user._id}-${dateKey}`;
 
-  for (const log of logs) {
-    const dateKey = log.date.toISOString().split("T")[0];
-    const user = log.userId as any;
-    if (!user || !user._id) {
-      console.warn('Skipping log with missing user reference', log._id);
-      continue;
-    }
-    const key = `${user._id}-${dateKey}`;
+      // choose the most accurate timestamp for ordering
+      const logTimestamp = log.timeOut ?? log.timeIn ?? log.date;
 
-    // choose the most accurate timestamp for ordering
-    const logTimestamp =
-      log.timeOut ??
-      log.timeIn ??
-      log.date;
+      if (!grouped[key]) {
+        grouped[key] = {
+          _id: key,
+          date: log.date,
+          user: log.userId,
 
-    if (!grouped[key]) {
-      grouped[key] = {
-        _id: key,
-        date: log.date,
-        user: log.userId,
+          dailyStatus: log.status,
+          _latestTime: logTimestamp,
 
-        dailyStatus: log.status,
-        _latestTime: logTimestamp,
+          attendance: null,
+          activities: [],
+        };
+      }
 
-        attendance: null,
-        activities: [],
-      };
-    }
-
-    if (log.reason === "attendance") {
-      grouped[key].attendance = {
-        timeIn: log.timeIn,
-        timeOut: log.timeOut,
-        status: log.status,
-      };
-    } else if (log.reason) {
-      grouped[key].activities.push({
-        reason: log.reason,
-        timeIn: log.timeIn,
-        timeOut: log.timeOut,
-        status: log.status,
-      });
-    }
-
-    /** ---------- DAILY STATUS (LATEST LOG WINS) ---------- */
-    if (logTimestamp > grouped[key]._latestTime) {
-      grouped[key].dailyStatus = log.status;
-      grouped[key]._latestTime = logTimestamp;
-    }
-  }
-
-  // remove internal helper field
-  const result = Object.values(grouped).map(({ _latestTime, ...rest }) => rest);
-
-  // Fill missing attendance entries by checking Attendance collection
-  for (const entry of result) {
-    try {
-      if (!entry.attendance && entry.user && entry.user.role === 'Staff') {
-        const start = new Date(entry.date);
-        start.setHours(0, 0, 0, 0);
-        const end = new Date(entry.date);
-        end.setHours(23, 59, 59, 999);
-
-        const att = await Attendance.findOne({
-          staffId: entry.user._id,
-          date: { $gte: start, $lte: end },
+      if (log.reason === "attendance") {
+        grouped[key].attendance = {
+          timeIn: log.timeIn,
+          timeOut: log.timeOut,
+          status: log.status,
+        };
+      } else if (log.reason) {
+        grouped[key].activities.push({
+          reason: log.reason,
+          timeIn: log.timeIn,
+          timeOut: log.timeOut,
+          status: log.status,
         });
+      }
 
-        if (att) {
+      /** ---------- DAILY STATUS (LATEST LOG WINS) ---------- */
+      if (logTimestamp > grouped[key]._latestTime) {
+        grouped[key].dailyStatus = log.status;
+        grouped[key]._latestTime = logTimestamp;
+      }
+    }
+
+    // remove internal helper field
+    const result = Object.values(grouped).map(
+      ({ _latestTime, ...rest }) => rest,
+    );
+
+    // Prefetch attendance for this staff to avoid N+1
+    const minDate = new Date(
+      Math.min(...result.map((e: any) => new Date(e.date).getTime())),
+    );
+    minDate.setHours(0, 0, 0, 0);
+    const maxDate = new Date(
+      Math.max(...result.map((e: any) => new Date(e.date).getTime())),
+    );
+    maxDate.setHours(23, 59, 59, 999);
+
+    const attends = await Attendance.find({
+      staffId: req.user.id,
+      date: { $gte: minDate, $lte: maxDate },
+    }).lean();
+
+    const attMap = new Map<string, any>();
+    for (const a of attends) {
+      const key = `${(a.staffId as any).toString()}-${new Date(a.date).toISOString().split("T")[0]}`;
+      attMap.set(key, a);
+    }
+
+    for (const entry of result) {
+      if (!entry.attendance && entry.user && entry.user.role === "Staff") {
+        const k = `${entry.user._id.toString()}-${new Date(entry.date).toISOString().split("T")[0]}`;
+        const a = attMap.get(k);
+        if (a) {
           entry.attendance = {
-            timeIn: att.timeIn,
-            timeOut: att.timeOut,
-            status: att.timeOut ? 'Checked Out' : 'In TUP',
+            timeIn: a.timeIn,
+            timeOut: a.timeOut,
+            status: a.timeOut ? "Checked Out" : "In TUP",
           };
         }
       }
-    } catch (err) {
-      console.error('Error filling attendance:', err);
     }
-  }
 
-  res.json(result);
-});
+    res.json(result);
+  },
+);
 
 export const getActivities = async (req: AuthRequest, res: Response) => {
   try {
@@ -1026,125 +1019,137 @@ export const getActivities = async (req: AuthRequest, res: Response) => {
 };
 
 // Export logs with password verification and CSV/XLSX support
-export const exportLogs = catchAsync(async (req: AuthRequest, res: Response, next: NextFunction) => {
-  const { startDate, endDate, month, format } = req.body;
-  const { password } = req.body;
+export const exportLogs = catchAsync(
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    const { startDate, endDate, month, format } = req.body;
+    const { password } = req.body;
 
-  if (!password || !format) {
-    return next(new AppError('Password and format are required', 400));
-  }
-
-  // verify password
-  const user = await User.findById(req.user.id).select('+passwordHash');
-  if (!user) return next(new AppError('User not found', 404));
-
-  const isMatch = await require('bcryptjs').compare(password, user.passwordHash);
-  if (!isMatch) return next(new AppError('Invalid password', 401));
-
-  // determine date range
-  let start: Date, end: Date;
-  if (month) {
-    const [year, mon] = month.split('-').map((v: string) => parseInt(v, 10));
-    start = new Date(year, mon - 1, 1);
-    end = new Date(year, mon, 0, 23, 59, 59, 999);
-  } else if (startDate && endDate) {
-    start = new Date(startDate);
-    start.setHours(0,0,0,0);
-    end = new Date(endDate);
-    end.setHours(23,59,59,999);
-  } else {
-    return next(new AppError('Date range or month required', 400));
-  }
-
-  // construct query
-  let query: any = {
-    date: { $gte: start, $lte: end },
-    reason: 'attendance'
-  };
-
-  // if not TUP (admin), limit to own logs only
-  if (req.user.role !== 'TUP') {
-    query.userId = req.user.id;
-  }
-
-  const logs = await Log.find(query).populate('userId', 'firstName surname role').sort({ date: -1 });
-
-  // Group by user+date to get timeIn/timeOut/status
-  const grouped: Record<string, any> = {};
-  for (const log of logs) {
-    const dateKey = log.date.toISOString().split('T')[0];
-    const user = log.userId as any;
-    if (!user || !user._id) {
-      console.warn('Skipping log with missing user reference', log._id);
-      continue;
-    }
-    const key = `${user._id}-${dateKey}`;
-    const logTimestamp = log.timeOut ?? log.timeIn ?? log.date;
-
-    if (!grouped[key]) {
-      grouped[key] = {
-        date: dateKey,
-        name: `${user.firstName} ${user.surname}`,
-        role: user.role,
-        timeIn: null,
-        timeOut: null,
-        status: log.status,
-        _latestTime: logTimestamp,
-      };
+    if (!password || !format) {
+      return next(new AppError("Password and format are required", 400));
     }
 
-    if (log.reason === 'attendance') {
-      if (log.timeIn) grouped[key].timeIn = log.timeIn;
-      if (log.timeOut) grouped[key].timeOut = log.timeOut;
+    // verify password
+    const user = await User.findById(req.user.id).select("+passwordHash");
+    if (!user) return next(new AppError("User not found", 404));
+
+    const isMatch = await require("bcryptjs").compare(
+      password,
+      user.passwordHash,
+    );
+    if (!isMatch) return next(new AppError("Invalid password", 401));
+
+    // determine date range
+    let start: Date, end: Date;
+    if (month) {
+      const [year, mon] = month.split("-").map((v: string) => parseInt(v, 10));
+      start = new Date(year, mon - 1, 1);
+      end = new Date(year, mon, 0, 23, 59, 59, 999);
+    } else if (startDate && endDate) {
+      start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+    } else {
+      return next(new AppError("Date range or month required", 400));
     }
 
-    if (logTimestamp > grouped[key]._latestTime) {
-      grouped[key].status = log.status;
-      grouped[key]._latestTime = logTimestamp;
+    // construct query
+    let query: any = {
+      date: { $gte: start, $lte: end },
+      reason: "attendance",
+    };
+
+    // if not TUP (admin), limit to own logs only
+    if (req.user.role !== "TUP") {
+      query.userId = req.user.id;
     }
-  }
 
-  const rows = Object.values(grouped).map((r: any) => ({
-    Date: r.date,
-    Name: r.name,
-    Role: r.role,
-    'Time In': r.timeIn ? r.timeIn.toISOString() : '',
-    'Time Out': r.timeOut ? r.timeOut.toISOString() : '',
-    Status: r.status,
-  }));
+    const logs = await Log.find(query)
+      .populate("userId", "firstName surname role")
+      .sort({ date: -1 });
 
-  // export
-  const filenameBase = `logs_${start.toISOString().split('T')[0]}_to_${end.toISOString().split('T')[0]}`;
+    // Group by user+date to get timeIn/timeOut/status
+    const grouped: Record<string, any> = {};
+    for (const log of logs) {
+      const dateKey = log.date.toISOString().split("T")[0];
+      const user = log.userId as any;
+      if (!user || !user._id) {
+        console.warn("Skipping log with missing user reference", log._id);
+        continue;
+      }
+      const key = `${user._id}-${dateKey}`;
+      const logTimestamp = log.timeOut ?? log.timeIn ?? log.date;
 
-  if (format === 'csv') {
-    const { Parser } = require('json2csv');
-    const parser = new Parser({ fields: ['Date','Name','Role','Time In','Time Out','Status'] });
-    const csv = parser.parse(rows);
-    res.header('Content-Type', 'text/csv');
-    res.attachment(`${filenameBase}.csv`).send(csv);
-    return;
-  }
+      if (!grouped[key]) {
+        grouped[key] = {
+          date: dateKey,
+          name: `${user.firstName} ${user.surname}`,
+          role: user.role,
+          timeIn: null,
+          timeOut: null,
+          status: log.status,
+          _latestTime: logTimestamp,
+        };
+      }
 
-  if (format === 'xlsx') {
-    const ExcelJS = require('exceljs');
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Logs');
-    sheet.columns = [
-      { header: 'Date', key: 'Date', width: 15 },
-      { header: 'Name', key: 'Name', width: 25 },
-      { header: 'Role', key: 'Role', width: 15 },
-      { header: 'Time In', key: 'Time In', width: 20 },
-      { header: 'Time Out', key: 'Time Out', width: 20 },
-      { header: 'Status', key: 'Status', width: 15 },
-    ];
+      if (log.reason === "attendance") {
+        if (log.timeIn) grouped[key].timeIn = log.timeIn;
+        if (log.timeOut) grouped[key].timeOut = log.timeOut;
+      }
 
-    rows.forEach(r => sheet.addRow(r));
+      if (logTimestamp > grouped[key]._latestTime) {
+        grouped[key].status = log.status;
+        grouped[key]._latestTime = logTimestamp;
+      }
+    }
 
-    const buffer = await workbook.xlsx.writeBuffer();
-    res.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.attachment(`${filenameBase}.xlsx`).send(buffer);
-    return;
-  }
+    const rows = Object.values(grouped).map((r: any) => ({
+      Date: r.date,
+      Name: r.name,
+      Role: r.role,
+      "Time In": r.timeIn ? r.timeIn.toISOString() : "",
+      "Time Out": r.timeOut ? r.timeOut.toISOString() : "",
+      Status: r.status,
+    }));
 
-  return next(new AppError('Unsupported format', 400));
-});
+    // export
+    const filenameBase = `logs_${start.toISOString().split("T")[0]}_to_${end.toISOString().split("T")[0]}`;
+
+    if (format === "csv") {
+      const { Parser } = require("json2csv");
+      const parser = new Parser({
+        fields: ["Date", "Name", "Role", "Time In", "Time Out", "Status"],
+      });
+      const csv = parser.parse(rows);
+      res.header("Content-Type", "text/csv");
+      res.attachment(`${filenameBase}.csv`).send(csv);
+      return;
+    }
+
+    if (format === "xlsx") {
+      const ExcelJS = require("exceljs");
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet("Logs");
+      sheet.columns = [
+        { header: "Date", key: "Date", width: 15 },
+        { header: "Name", key: "Name", width: 25 },
+        { header: "Role", key: "Role", width: 15 },
+        { header: "Time In", key: "Time In", width: 20 },
+        { header: "Time Out", key: "Time Out", width: 20 },
+        { header: "Status", key: "Status", width: 15 },
+      ];
+
+      rows.forEach((r) => sheet.addRow(r));
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      res.header(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      );
+      res.attachment(`${filenameBase}.xlsx`).send(buffer);
+      return;
+    }
+
+    return next(new AppError("Unsupported format", 400));
+  },
+);

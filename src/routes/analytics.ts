@@ -1,9 +1,12 @@
-import express from 'express'
-import { getAnalyticsOverview } from '../controllers/analyticsController'
+import express from "express";
+import {
+  getAnalyticsOverview,
+  getHourlyAnalytics,
+} from "../controllers/analyticsController";
 
+const router = express.Router();
 
-const router = express.Router()
+router.get("/admin", getAnalyticsOverview);
+router.get("/hourly", getHourlyAnalytics);
 
-router.get('/admin', getAnalyticsOverview)
-
-export default router
+export default router;
