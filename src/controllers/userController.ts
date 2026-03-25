@@ -5,6 +5,7 @@ import QRCode from "../models/QRCode";
 import QRRequest from "../models/QRRequest";
 import { generateQRString } from "../utils/qrUtils";
 import { catchAsync } from "../utils/catchAsync";
+import { AppError } from "../utils/AppError";
 import { validationResult } from "express-validator";
 interface AuthRequest extends Request {
   user?: any;
@@ -262,6 +263,7 @@ export const adminRegisterUser = async (req: AuthRequest, res: Response) => {
       email,
       passwordHash,
       photoURL: photoURL || "https://placehold.co/200x200?text=TUP+VMS",
+      mustCapturePhoto: true,
     });
 
     await user.save();
@@ -289,3 +291,39 @@ export const adminRegisterUser = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+export const completeFirstPhotoCapture = catchAsync(
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    const { photoDataUrl } = req.body;
+
+    if (!photoDataUrl || typeof photoDataUrl !== "string") {
+      return next(new AppError("Photo capture is required", 400));
+    }
+
+    if (!photoDataUrl.startsWith("data:image/")) {
+      return next(new AppError("Invalid photo format", 400));
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return next(new AppError("User not found", 404));
+    }
+
+    user.photoURL = photoDataUrl;
+    user.mustCapturePhoto = false;
+    await user.save();
+
+    res.status(200).json({
+      message: "Photo captured successfully",
+      user: {
+        _id: user._id.toString(),
+        role: user.role,
+        firstName: user.firstName,
+        surname: user.surname,
+        staffType: user.staffType,
+        photoURL: user.photoURL,
+        mustCapturePhoto: user.mustCapturePhoto,
+      },
+    });
+  },
+);

@@ -11,6 +11,7 @@ export interface IUser extends Document {
   email: string;
   passwordHash: string;
   status: "Active" | "In TUP" | "Inactive";
+  mustCapturePhoto: boolean;
   createdAt: Date;
 }
 
@@ -32,6 +33,7 @@ const UserSchema: Schema = new Schema({
     enum: ["Active", "In TUP", "Inactive"],
     default: "Active",
   },
+  mustCapturePhoto: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
 });
 

@@ -114,6 +114,9 @@ export const login = async (req: Request, res: Response) => {
         role: user.role,
         firstName: user.firstName,
         surname: user.surname,
+        staffType: user.staffType,
+        photoURL: user.photoURL,
+        mustCapturePhoto: user.mustCapturePhoto,
       },
     });
   } catch (error) {

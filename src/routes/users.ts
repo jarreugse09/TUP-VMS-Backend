@@ -10,6 +10,7 @@ import {
   rejectQRRequest,
   getAllUsers,
   adminRegisterUser,
+  completeFirstPhotoCapture,
 } from "../controllers/userController";
 import { authenticateToken, authorizeRoles } from "../middlewares/auth";
 import { body } from "express-validator";
@@ -51,6 +52,11 @@ router.post(
   adminRegisterUser,
 );
 router.get("/profile", authenticateToken, getProfile);
+router.post(
+  "/profile/first-photo",
+  authenticateToken,
+  completeFirstPhotoCapture,
+);
 router.post(
   "/request-qr-change",
   authenticateToken,
