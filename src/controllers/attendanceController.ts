@@ -50,7 +50,7 @@ export const getAttendance = catchAsync(
 // Export attendance with password verification
 export const exportAttendance = catchAsync(
   async (req: AuthRequest, res: Response, next: NextFunction) => {
-    const { startDate, endDate, month, format } = req.body;
+    const { startDate, endDate, month, format, role } = req.body;
     const { password } = req.body;
 
     if (!password || !format)
@@ -93,7 +93,8 @@ export const exportAttendance = catchAsync(
       .populate("staffId", "firstName surname role")
       .sort({ date: -1 });
 
-    const rows = attends.map((a) => {
+    // Filter by role if specified
+    let rows = attends.map((a) => {
       const staff = a.staffId as any;
       return {
         Date: a.date.toISOString().split("T")[0],
@@ -104,6 +105,10 @@ export const exportAttendance = catchAsync(
         Status: a.timeOut ? "Checked Out" : "In TUP",
       };
     });
+
+    if (role) {
+      rows = rows.filter((row) => row.Role === role);
+    }
 
     const filenameBase = `attendance_${start.toISOString().split("T")[0]}_to_${end.toISOString().split("T")[0]}`;
 
