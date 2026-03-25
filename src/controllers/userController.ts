@@ -154,7 +154,9 @@ export const getAllUsers = catchAsync(
     }
 
     const users = await User.find(query)
-      .select("_id firstName surname birthdate role status photoURL createdAt")
+      .select(
+        "_id firstName surname birthdate role staffType status photoURL email createdAt",
+      )
       .lean();
 
     res.status(200).json(users);
@@ -194,11 +196,9 @@ export const adminRegisterUser = async (req: AuthRequest, res: Response) => {
 
     const existingQR = await QRCode.findOne({ qrString: normalizedQR });
     if (existingQR) {
-      return res
-        .status(400)
-        .json({
-          message: "QR string already exists. Please use a unique value.",
-        });
+      return res.status(400).json({
+        message: "QR string already exists. Please use a unique value.",
+      });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
@@ -220,11 +220,9 @@ export const adminRegisterUser = async (req: AuthRequest, res: Response) => {
       await new QRCode({ userId: user._id, qrString: normalizedQR }).save();
     } catch (qrError: any) {
       if (qrError?.code === 11000) {
-        return res
-          .status(400)
-          .json({
-            message: "QR string already exists. Please use a unique value.",
-          });
+        return res.status(400).json({
+          message: "QR string already exists. Please use a unique value.",
+        });
       }
       throw qrError;
     }
@@ -232,11 +230,9 @@ export const adminRegisterUser = async (req: AuthRequest, res: Response) => {
     res.status(201).json({ message: "User registered successfully" });
   } catch (error: any) {
     if (error?.code === 11000 && error?.keyPattern?.qrString) {
-      return res
-        .status(400)
-        .json({
-          message: "QR string already exists. Please use a unique value.",
-        });
+      return res.status(400).json({
+        message: "QR string already exists. Please use a unique value.",
+      });
     }
 
     console.error("Admin Register Error:", error);
