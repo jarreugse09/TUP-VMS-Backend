@@ -9,8 +9,10 @@ import {
   approveQRRequest,
   rejectQRRequest,
   getAllUsers,
+  adminRegisterUser,
 } from "../controllers/userController";
 import { authenticateToken, authorizeRoles } from "../middlewares/auth";
+import { body } from "express-validator";
 
 const router = express.Router();
 
@@ -26,27 +28,52 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-
-router.get("/admin/", authenticateToken, getAllUsers)
+router.get("/admin/", authenticateToken, authorizeRoles("TUP"), getAllUsers);
+router.post(
+  "/admin/register",
+  authenticateToken,
+  authorizeRoles("TUP"),
+  [
+    body("firstName").notEmpty(),
+    body("surname").notEmpty(),
+    body("birthdate").isISO8601(),
+    body("role").isIn(["Staff", "Student"]),
+    body("staffType")
+      .if(body("role").equals("Staff"))
+      .notEmpty()
+      .withMessage("Staff type is required for Staff role"),
+    body("email").isEmail(),
+    body("password").isLength({ min: 6 }),
+    body("customQR")
+      .matches(/^TUP-\d{2}-\d{4}$/)
+      .withMessage("Invalid QR format. Use TUP-YY-XXXX."),
+  ],
+  adminRegisterUser,
+);
 router.get("/profile", authenticateToken, getProfile);
-router.post("/request-qr-change", authenticateToken, upload.single("newQRImage"), requestQRChange);
+router.post(
+  "/request-qr-change",
+  authenticateToken,
+  upload.single("newQRImage"),
+  requestQRChange,
+);
 router.get(
   "/qr-requests",
   authenticateToken,
   authorizeRoles("TUP"),
-  getQRRequests
+  getQRRequests,
 );
 router.put(
   "/qr-requests/:requestId/approve",
   authenticateToken,
   authorizeRoles("TUP"),
-  approveQRRequest
+  approveQRRequest,
 );
 router.put(
   "/qr-requests/:requestId/reject",
   authenticateToken,
   authorizeRoles("TUP"),
-  rejectQRRequest
+  rejectQRRequest,
 );
 
 export default router;

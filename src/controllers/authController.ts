@@ -15,6 +15,12 @@ export const register = async (req: Request, res: Response) => {
   }
 
   try {
+    if (typeof req.body.customQR !== "undefined") {
+      return res
+        .status(403)
+        .json({ message: "QR customization is restricted to admins" });
+    }
+
     // Normalize email
     const email = req.body.email?.trim().toLowerCase();
 
@@ -77,7 +83,9 @@ export const login = async (req: Request, res: Response) => {
     const password = req.body.password;
 
     if (!email || !password) {
-      return res.status(400).json({ message: "Email and password are required" });
+      return res
+        .status(400)
+        .json({ message: "Email and password are required" });
     }
 
     // Find user
@@ -96,7 +104,7 @@ export const login = async (req: Request, res: Response) => {
     const token = jwt.sign(
       { id: user._id, role: user.role },
       process.env.JWT_SECRET!,
-      { expiresIn: "1h" }
+      { expiresIn: "1h" },
     );
 
     res.json({
