@@ -854,6 +854,32 @@ export const getLogs = catchAsync(async (req: AuthRequest, res: Response) => {
   // remove internal helper field
   const result = Object.values(grouped).map(({ _latestTime, ...rest }) => rest);
 
+  const userIds = Array.from(
+    new Set(
+      result
+        .filter((entry: any) => entry.user && entry.user._id)
+        .map((entry: any) => entry.user._id.toString()),
+    ),
+  );
+
+  const qrCodes = userIds.length
+    ? await QRCode.find({ userId: { $in: userIds } })
+        .select("userId qrString")
+        .lean()
+    : [];
+  const qrMap = new Map(
+    qrCodes.map((qr: any) => [qr.userId.toString(), qr.qrString]),
+  );
+
+  for (const entry of result) {
+    if (entry.user && entry.user._id) {
+      entry.user = {
+        ...entry.user,
+        qrString: qrMap.get(entry.user._id.toString()) || null,
+      };
+    }
+  }
+
   // Prefetch attendance for staff users to avoid N+1 queries
   const staffIds = Array.from(
     new Set(
@@ -967,6 +993,32 @@ export const getStaffLogs = catchAsync(
     const result = Object.values(grouped).map(
       ({ _latestTime, ...rest }) => rest,
     );
+
+    const userIds = Array.from(
+      new Set(
+        result
+          .filter((entry: any) => entry.user && entry.user._id)
+          .map((entry: any) => entry.user._id.toString()),
+      ),
+    );
+
+    const qrCodes = userIds.length
+      ? await QRCode.find({ userId: { $in: userIds } })
+          .select("userId qrString")
+          .lean()
+      : [];
+    const qrMap = new Map(
+      qrCodes.map((qr: any) => [qr.userId.toString(), qr.qrString]),
+    );
+
+    for (const entry of result) {
+      if (entry.user && entry.user._id) {
+        entry.user = {
+          ...entry.user,
+          qrString: qrMap.get(entry.user._id.toString()) || null,
+        };
+      }
+    }
 
     // Prefetch attendance for this staff to avoid N+1
     const minDate = new Date(

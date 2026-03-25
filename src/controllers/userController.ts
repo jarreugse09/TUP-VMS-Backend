@@ -11,7 +11,7 @@ interface AuthRequest extends Request {
   file?: any;
 }
 
-const ADMIN_QR_FORMAT = /^TUP-\d{2}-\d{4}$/;
+const ADMIN_QR_FORMAT = /^(TUPM|TUPS|TUPV)-\d{2}-\d{4}$/;
 
 export const getProfile = async (req: AuthRequest, res: Response) => {
   try {
@@ -72,11 +72,45 @@ export const requestQRChange = async (req: AuthRequest, res: Response) => {
 
 export const getQRRequests = async (req: AuthRequest, res: Response) => {
   try {
-    const requests = await QRRequest.find().populate(
-      "userId",
-      "firstName surname role",
+    const requests = await QRRequest.find()
+      .populate({
+        path: "userId",
+        select: "firstName surname role",
+        options: { lean: true },
+      })
+      .lean();
+
+    const userIds = Array.from(
+      new Set(
+        requests
+          .map((r: any) => r.userId?._id?.toString())
+          .filter((id: string | undefined): id is string => Boolean(id)),
+      ),
     );
-    res.json(requests);
+
+    const qrCodes = userIds.length
+      ? await QRCode.find({ userId: { $in: userIds } })
+          .select("userId qrString")
+          .lean()
+      : [];
+
+    const qrMap = new Map(
+      qrCodes.map((qr: any) => [qr.userId.toString(), qr.qrString]),
+    );
+
+    const enrichedRequests = requests.map((request: any) => {
+      const user = request.userId;
+      if (!user?._id) return request;
+      return {
+        ...request,
+        userId: {
+          ...user,
+          qrString: qrMap.get(user._id.toString()) || null,
+        },
+      };
+    });
+
+    res.json(enrichedRequests);
   } catch (error) {
     res.status(500).json({ message: "Server error" });
   }
@@ -159,7 +193,23 @@ export const getAllUsers = catchAsync(
       )
       .lean();
 
-    res.status(200).json(users);
+    const userIds = users.map((user: any) => user._id.toString());
+    const qrCodes = userIds.length
+      ? await QRCode.find({ userId: { $in: userIds } })
+          .select("userId qrString")
+          .lean()
+      : [];
+
+    const qrMap = new Map(
+      qrCodes.map((qr: any) => [qr.userId.toString(), qr.qrString]),
+    );
+
+    const usersWithQR = users.map((user: any) => ({
+      ...user,
+      qrString: qrMap.get(user._id.toString()) || null,
+    }));
+
+    res.status(200).json(usersWithQR);
   },
 );
 
@@ -186,7 +236,7 @@ export const adminRegisterUser = async (req: AuthRequest, res: Response) => {
     if (!ADMIN_QR_FORMAT.test(normalizedQR || "")) {
       return res
         .status(400)
-        .json({ message: "Invalid QR format. Use TUP-YY-XXXX." });
+        .json({ message: "Invalid QR format. Use TUPM/TUPS/TUPV-YY-XXXX." });
     }
 
     const existingUser = await User.findOne({ email });

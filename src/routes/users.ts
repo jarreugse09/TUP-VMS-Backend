@@ -45,8 +45,8 @@ router.post(
     body("email").isEmail(),
     body("password").isLength({ min: 6 }),
     body("customQR")
-      .matches(/^TUP-\d{2}-\d{4}$/)
-      .withMessage("Invalid QR format. Use TUP-YY-XXXX."),
+      .matches(/^(TUPM|TUPS|TUPV)-\d{2}-\d{4}$/)
+      .withMessage("Invalid QR format. Use TUPM/TUPS/TUPV-YY-XXXX."),
   ],
   adminRegisterUser,
 );
