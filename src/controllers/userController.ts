@@ -57,6 +57,7 @@ export const requestQRChange = async (req: AuthRequest, res: Response) => {
 
     const request = new QRRequest({
       userId: user._id,
+      requestType: "QR",
       oldQR: qrCode.qrString,
       reason,
       newQRString: newQRString || undefined,
@@ -71,12 +72,48 @@ export const requestQRChange = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const requestProfilePhotoChange = async (
+  req: AuthRequest,
+  res: Response,
+) => {
+  const { reason } = req.body;
+
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (!req.file) {
+      return res
+        .status(400)
+        .json({ message: "Please upload a new profile photo" });
+    }
+
+    const path = require("path");
+    const relPath = path.relative(process.cwd(), req.file.path).replace(/\\/g, "/");
+
+    const request = new QRRequest({
+      userId: user._id,
+      requestType: "PROFILE_PHOTO",
+      reason: reason || "Profile photo update",
+      oldPhotoURL: user.photoURL,
+      newPhotoImage: `/${relPath}`,
+    });
+
+    await request.save();
+    res.json({ message: "Profile photo change request submitted" });
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 export const getQRRequests = async (req: AuthRequest, res: Response) => {
   try {
     const requests = await QRRequest.find()
       .populate({
         path: "userId",
-        select: "firstName surname role",
+        select: "firstName surname role photoURL",
         options: { lean: true },
       })
       .lean();
@@ -126,24 +163,45 @@ export const approveQRRequest = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: "Request not found" });
     }
 
-    const qrCode = await QRCode.findOne({ userId: request.userId });
-    if (!qrCode) {
-      return res.status(404).json({ message: "QR code not found" });
+    if (request.requestType === "PROFILE_PHOTO") {
+      if (!request.newPhotoImage) {
+        return res
+          .status(400)
+          .json({ message: "No uploaded photo found for this request" });
+      }
+
+      const userObj = await User.findById(request.userId);
+      if (!userObj) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      userObj.photoURL = request.newPhotoImage;
+      await userObj.save();
+    } else {
+      const qrCode = await QRCode.findOne({ userId: request.userId });
+      if (!qrCode) {
+        return res.status(404).json({ message: "QR code not found" });
+      }
+
+      // Use the user's supplied QR string if present, otherwise generate a new one
+      const userObj = await User.findById(request.userId);
+      const newQRString = request.newQRString || generateQRString(userObj!.role);
+
+      qrCode.qrString = newQRString;
+      qrCode.updatedAt = new Date();
+      await qrCode.save();
     }
-
-    // Use the user's supplied QR string if present, otherwise generate a new one
-    const userObj = await User.findById(request.userId);
-    const newQRString = request.newQRString || generateQRString(userObj!.role);
-
-    qrCode.qrString = newQRString;
-    qrCode.updatedAt = new Date();
-    await qrCode.save();
 
     request.status = "Approved";
     request.approvedBy = req.user.id;
     await request.save();
 
-    res.json({ message: "QR change approved" });
+    res.json({
+      message:
+        request.requestType === "PROFILE_PHOTO"
+          ? "Profile photo change approved"
+          : "QR change approved",
+    });
   } catch (error) {
     res.status(500).json({ message: "Server error" });
   }

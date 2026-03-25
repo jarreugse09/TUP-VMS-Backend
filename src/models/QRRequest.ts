@@ -3,10 +3,13 @@ import mongoose, { Document, Schema } from "mongoose";
 export interface IQRRequest extends Document {
   _id: mongoose.Types.ObjectId;
   userId: mongoose.Types.ObjectId;
-  oldQR: string;
+  requestType: "QR" | "PROFILE_PHOTO";
+  oldQR?: string;
   reason: string;
   newQRString?: string;
   newQRImage?: string;
+  oldPhotoURL?: string;
+  newPhotoImage?: string;
   status: "Pending" | "Approved" | "Rejected";
   approvedBy?: mongoose.Types.ObjectId;
   createdAt: Date;
@@ -14,10 +17,18 @@ export interface IQRRequest extends Document {
 
 const QRRequestSchema: Schema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
-  oldQR: { type: String, required: true },
+  requestType: {
+    type: String,
+    enum: ["QR", "PROFILE_PHOTO"],
+    default: "QR",
+    required: true,
+  },
+  oldQR: { type: String },
   reason: { type: String, required: true },
   newQRString: { type: String },
   newQRImage: { type: String },
+  oldPhotoURL: { type: String },
+  newPhotoImage: { type: String },
   status: {
     type: String,
     enum: ["Pending", "Approved", "Rejected"],

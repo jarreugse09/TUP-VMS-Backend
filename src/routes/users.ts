@@ -11,6 +11,7 @@ import {
   getAllUsers,
   adminRegisterUser,
   completeFirstPhotoCapture,
+  requestProfilePhotoChange,
 } from "../controllers/userController";
 import { authenticateToken, authorizeRoles } from "../middlewares/auth";
 import { body } from "express-validator";
@@ -28,6 +29,17 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
 });
 const upload = multer({ storage });
+
+const profileUploadDir = path.join(process.cwd(), "uploads", "profile-requests");
+if (!fs.existsSync(profileUploadDir)) {
+  fs.mkdirSync(profileUploadDir, { recursive: true });
+}
+
+const profileStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, profileUploadDir),
+  filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
+});
+const profileUpload = multer({ storage: profileStorage });
 
 router.get("/admin/", authenticateToken, authorizeRoles("TUP"), getAllUsers);
 router.post(
@@ -62,6 +74,12 @@ router.post(
   authenticateToken,
   upload.single("newQRImage"),
   requestQRChange,
+);
+router.post(
+  "/request-profile-photo",
+  authenticateToken,
+  profileUpload.single("newPhotoImage"),
+  requestProfilePhotoChange,
 );
 router.get(
   "/qr-requests",
