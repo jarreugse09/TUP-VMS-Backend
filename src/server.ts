@@ -18,10 +18,34 @@ const PORT = process.env.PORT || 5000;
 app.set("trust proxy", 1);
 
 // === 2️⃣ CORS configuration ===
-const allowedOrigin = (process.env.FRONTEND_URL || "").replace(/\/$/, "");
+const configuredOrigins = (process.env.FRONTEND_URL || "")
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/$/, ""))
+  .filter(Boolean);
+
+const allowedOrigins = Array.from(
+  new Set([
+    ...configuredOrigins,
+    "http://localhost:5173",
+    "http://localhost:5174",
+  ]),
+);
 
 const corsOptions = {
-  origin: allowedOrigin, // must match frontend exactly
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+
+    const normalizedOrigin = origin.replace(/\/$/, "");
+    if (allowedOrigins.includes(normalizedOrigin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error("Not allowed by CORS"));
+  },
   credentials: true,
   methods: ["GET","POST","PUT","DELETE","PATCH","OPTIONS"],
   allowedHeaders: ["Content-Type","Authorization"]

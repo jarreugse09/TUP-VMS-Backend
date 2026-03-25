@@ -3,9 +3,12 @@ import {
   scanQR,
   recordActivity,
   getLogs,
-  getActivities, visitorScanQR,
+  getActivities,
+  visitorScanQR,
   scanTransactionQR,
   getStaffLogs,
+  getUserTransactions,
+  getUserAttendance,
   exportLogs,
 } from "../controllers/logController";
 import { authenticateToken, authorizeRoleOrStaffType, authorizeRoles, } from "../middlewares/auth";
@@ -25,11 +28,15 @@ router.post(
 
 router.post("/staff/scan", authenticateToken, authorizeRoles("Staff"), scanTransactionQR);
 
-router.post("/user/scan", authenticateToken, authorizeRoles("Visitor", "Student"), visitorScanQR);
+router.post("/user/scan", authenticateToken, authorizeRoles("Visitor", "Student", "Staff"), visitorScanQR);
 router.post("/activity", authenticateToken, recordActivity);
 router.get("/logs", authenticateToken, authorizeRoles("TUP"), getLogs);
 
-router.get("/logs/staff/", authenticateToken, authorizeRoles("TUP", "Staff"), getStaffLogs);
+router.get("/logs/staff/", authenticateToken, getStaffLogs);
+
+router.get("/logs/transactions", authenticateToken, getUserTransactions);
+
+router.get("/logs/attendance", authenticateToken, getUserAttendance);
 
 router.get("/activities", authenticateToken, getActivities);
 

@@ -28,7 +28,12 @@ export const authenticateToken = (
 
 export const authorizeRoles = (...roles: string[]) => {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (!req.user || !roles.includes(req.user.role)) {
+    const userRole = String(req.user?.role || "")
+      .trim()
+      .toLowerCase();
+    const allowedRoles = roles.map((role) => role.trim().toLowerCase());
+
+    if (!req.user || !allowedRoles.includes(userRole)) {
       return res.status(403).json({ message: "Insufficient permissions" });
     }
     next();
@@ -47,13 +52,23 @@ export const authorizeRoleOrStaffType = (
       return res.status(401).json({ message: "Unauthorized" });
     }
 
+    const userRole = String(req.user?.role || "")
+      .trim()
+      .toLowerCase();
+    const userStaffType = String(req.user?.staffType || "")
+      .trim()
+      .toLowerCase();
+
     const hasRole =
-      roles.length > 0 && roles.includes(req.user.role);
+      roles.length > 0 &&
+      roles.map((role) => role.trim().toLowerCase()).includes(userRole);
 
     const hasStaffType =
       staffTypes.length > 0 &&
-      req.user.staffType &&
-      staffTypes.includes(req.user.staffType);
+      userStaffType &&
+      staffTypes
+        .map((staffType) => staffType.trim().toLowerCase())
+        .includes(userStaffType);
 
     if (!hasRole && !hasStaffType) {
       return res.status(403).json({ message: "Insufficient permissions" });

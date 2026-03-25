@@ -162,11 +162,12 @@ export const scanQR = catchAsync(
     if (user.role === "Student" || user.role === "Visitor") {
       // ---------- CHECK-IN ----------
       if (mode === "checkin") {
-        // Check if already checked in today (scanned by guard/admin)
+        // Check if already checked in today (must have no timeOut AND current status is "In TUP")
         const existingLog = await Log.findOne({
           userId: user._id,
           date: { $gte: today },
           timeOut: null,
+          status: "In TUP", // Only check in if there's no active "In TUP" log
         });
 
         if (existingLog) {
@@ -184,7 +185,12 @@ export const scanQR = catchAsync(
           scannedBy: req.user.id,
         });
 
-        await log.save();
+        const savedLog = await log.save();
+        
+        if (!savedLog) {
+          return next(new AppError("Failed to check in. Please try again.", 400));
+        }
+
         return res
           .status(201)
           .json({ message: "Checked In Successfully", user: safeUser });
@@ -192,21 +198,32 @@ export const scanQR = catchAsync(
 
       // ---------- CHECK-OUT ----------
       else if (mode === "checkout") {
-        // Find active check-in
+        // Find active check-in with explicit status check
         const existingLog = await Log.findOne({
           userId: user._id,
           date: { $gte: today },
           timeOut: null,
+          status: { $ne: "Checked Out" }, // Ensure not already checked out
         });
 
         if (!existingLog) {
           return next(new AppError("User must check in first!", 400));
         }
 
-        // Modify checkout
-        existingLog.timeOut = new Date();
-        existingLog.status = "Checked Out";
-        await existingLog.save();
+        // Update checkout with updateOne to ensure atomicity
+        const updateResult = await Log.updateOne(
+          { _id: existingLog._id },
+          {
+            $set: {
+              timeOut: new Date(),
+              status: "Checked Out",
+            },
+          }
+        );
+
+        if (updateResult.modifiedCount === 0) {
+          return next(new AppError("Failed to checkout. Please try again.", 400));
+        }
 
         return res
           .status(201)
@@ -527,7 +544,7 @@ export const scanTransactionQR = catchAsync(
       const existingLog = await Log.findOne({
         userId: req.user.id, // staff who scanned
         transId: user._id, // staff being scanned
-        qrId: qrCode.id,
+        qrId: qrCode._id,
         status: "Transaction",
         reason: type,
         date: { $gte: today },
@@ -545,7 +562,7 @@ export const scanTransactionQR = catchAsync(
       const newLog = await Log.create({
         userId: req.user.id, // staff who scanned
         transId: user._id, // staff scanned
-        qrId: qrCode.id,
+        qrId: qrCode._id,
         status: type,
         reason: type,
         scannedBy: req.user.id,
@@ -572,7 +589,7 @@ export const scanTransactionQR = catchAsync(
       const existingLog = await Log.findOne({
         userId: req.user.id, // staff who scanned
         transId: user._id, // staff scanned
-        qrId: qrCode.id,
+        qrId: qrCode._id,
         status: "Transaction",
         reason: type,
         date: { $gte: today },
@@ -590,7 +607,7 @@ export const scanTransactionQR = catchAsync(
       const newLog = await Log.create({
         userId: req.user.id,
         transId: user._id,
-        qrId: qrCode.id,
+        qrId: qrCode._id,
         status: type,
         reason: type,
         scannedBy: req.user.id,
@@ -619,10 +636,10 @@ export const visitorScanQR = catchAsync(
     // =========================
     // 1. REQUEST VALIDATION
     // =========================
-    const { qrString, mode, type } = req.body;
+    const { qrString, type } = req.body;
 
     // Required fields and enforced transaction type
-    if (!qrString || !mode || type !== "Transaction") {
+    if (!qrString || type !== "Transaction") {
       return next(new AppError("Invalid empty fields.", 400));
     }
 
@@ -634,116 +651,61 @@ export const visitorScanQR = catchAsync(
       return next(new AppError("QR code not found", 404));
     }
 
-    // Identify the staff being scanned (transaction target)
-    const user = await User.findOne({ _id: qrCode.userId });
-    if (!user) {
+    // Identify the target being scanned (transaction target)
+    const targetUser = await User.findOne({ _id: qrCode.userId });
+    if (!targetUser) {
       return next(new AppError("User not found", 404));
     }
 
     // =========================
-    // 3. DATE (TODAY ONLY)
+    // 3. ACCESS CONTROL
     // =========================
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    // =========================
-    // 4. ACCESS CONTROL
-    // =========================
-    // Only Visitors or Students are allowed to use this scanner
-    if (req.user?.role !== "Visitor" && req.user?.role !== "Student") {
+    // Visitors, Students, and Staff are allowed to use this transaction scanner
+    if (
+      req.user?.role !== "Visitor" &&
+      req.user?.role !== "Student" &&
+      req.user?.role !== "Staff"
+    ) {
       return next(new AppError("Invalid access", 500));
     }
 
-    // =====================================================
-    // 5. CHECK-IN TRANSACTION
-    // =====================================================
-    if (mode === "checkin" && type === "Transaction") {
-      // Look for an existing transaction log today
-      const existingLog = await Log.findOne({
-        userId: req.user.id, // visitor/student who scanned
-        transId: user._id, // staff being scanned
-        qrId: qrCode.id,
-        status: "Transaction",
-        reason: type,
-        date: { $gte: today },
-        scannedBy: req.user._id,
-        timeIn: null,
-      });
+    // =========================
+    // 4. TRANSACTION LOGGING (NO CHECK-IN/CHECK-OUT)
+    // =========================
+    // For normal users, scanning only records a transaction
+    // Check-in/check-out is controlled exclusively by admin scans
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-      // If found, update the time-in
-      if (existingLog) {
-        existingLog.timeIn = new Date();
-        await existingLog.save();
-      }
+    const newLog = await Log.create({
+      userId: req.user.id, // authenticated user who scanned
+      transId: targetUser._id, // target being scanned
+      qrId: qrCode._id,
+      status: "Transaction", // Always transaction for user scans
+      reason: "transaction",
+      scannedBy: req.user.id,
+      date: today,
+      timeIn: new Date(), // Record the time of scan
+    });
 
-      // Always create a new transaction log (per current logic)
-      const newLog = await Log.create({
-        userId: req.user._id,
-        transId: user._id,
-        qrId: qrCode.id,
-        status: type,
-        reason: type,
-        scannedBy: req.user._id,
-        timeOut: null,
-        date: today,
-        timeIn: new Date(),
-      });
-
-      if (!newLog) {
-        return next(new AppError("Error Transaction. Please try again", 404));
-      }
-
-      return res.status(201).json({
-        status: "success",
-        message: "Transaction check-in.",
-      });
+    if (!newLog) {
+      return next(new AppError("Error recording transaction. Please try again", 404));
     }
 
-    // =====================================================
-    // 6. CHECK-OUT TRANSACTION
-    // =====================================================
-    else if (mode === "checkout" && type === "Transaction") {
-      // Look for an active transaction log today
-      const existingLog = await Log.findOne({
-        userId: req.user._id, // visitor/student who scanned
-        transId: user._id, // staff being scanned
-        qrId: qrCode.id,
-        status: "Transaction",
-        reason: type,
-        date: { $gte: today },
-        scannedBy: req.user._id,
-        timeOut: null,
-      });
-
-      // If found, update the time-out
-      if (existingLog) {
-        existingLog.timeOut = new Date();
-        await existingLog.save();
-      }
-
-      // Always create a new checkout transaction log (per current logic)
-      const newLog = await Log.create({
-        userId: req.user._id,
-        transId: user._id,
-        qrId: qrCode.id,
-        status: type,
-        reason: type,
-        scannedBy: req.user._id,
-        timeIn: null,
-        date: today,
-        timeOut: new Date(),
-      });
-
-      if (!newLog) {
-        return next(new AppError("Error Transaction. Please try again", 404));
-      }
-
-      return res.status(201).json({
-        status: "success",
-        message: "Transaction check-out.",
-      });
-    }
-  },
+    return res.status(201).json({
+      status: "success",
+      message: "Transaction recorded successfully",
+      user: {
+        _id: targetUser._id,
+        firstName: targetUser.firstName,
+        surname: targetUser.surname,
+        role: targetUser.role,
+        photoURL: targetUser.photoURL,
+        status: targetUser.status,
+      },
+    });
+  }
 );
 
 export const recordActivity = async (req: AuthRequest, res: Response) => {
@@ -936,6 +898,16 @@ export const getStaffLogs = catchAsync(
         select: "firstName surname role photoURL birthdate",
         options: { lean: true },
       })
+      .populate({
+        path: "transId",
+        select: "firstName surname role",
+        options: { lean: true },
+      })
+      .populate({
+        path: "qrId",
+        select: "qrString userId",
+        options: { lean: true },
+      })
       .sort({ date: -1, timeIn: -1 })
       .lean();
 
@@ -974,11 +946,22 @@ export const getStaffLogs = catchAsync(
           status: log.status,
         };
       } else if (log.reason) {
+        const scannedPerson = log.transId as any;
+        const scannedQR = log.qrId as any;
         grouped[key].activities.push({
           reason: log.reason,
           timeIn: log.timeIn,
           timeOut: log.timeOut,
           status: log.status,
+          scannedQrString: scannedQR?.qrString || null,
+          scannedTarget: scannedPerson
+            ? {
+                firstName: scannedPerson.firstName,
+                surname: scannedPerson.surname,
+                role: scannedPerson.role,
+              }
+            : null,
+          scannedAt: log.timeIn || log.timeOut || log.date,
         });
       }
 
@@ -1020,6 +1003,10 @@ export const getStaffLogs = catchAsync(
       }
     }
 
+    if (!result.length) {
+      return res.json([]);
+    }
+
     // Prefetch attendance for this staff to avoid N+1
     const minDate = new Date(
       Math.min(...result.map((e: any) => new Date(e.date).getTime())),
@@ -1054,6 +1041,70 @@ export const getStaffLogs = catchAsync(
         }
       }
     }
+
+    res.json(result);
+  },
+);
+
+// Get individual transaction logs for users (not grouped, one row per transaction)
+export const getUserTransactions = catchAsync(
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    const transactionLogs = await Log.find({
+      userId: req.user.id,
+      status: "Transaction", // Only transactions, exclude attendance
+    })
+      .populate({
+        path: "transId",
+        select: "firstName surname role",
+        options: { lean: true },
+      })
+      .populate({
+        path: "qrId",
+        select: "qrString",
+        options: { lean: true },
+      })
+      .sort({ date: -1, timeIn: -1 })
+      .lean();
+
+    // Transform to flat list of transactions
+    const result = transactionLogs.map((log: any) => ({
+      _id: log._id,
+      date: log.date,
+      timeIn: log.timeIn,
+      timeOut: log.timeOut,
+      status: log.status,
+      reason: log.reason,
+      scannedTarget: log.transId
+        ? {
+            firstName: log.transId.firstName,
+            surname: log.transId.surname,
+            role: log.transId.role,
+          }
+        : null,
+      scannedQRString: log.qrId?.qrString || null,
+      scannedAt: log.timeIn || log.timeOut || log.date,
+    }));
+
+    res.json(result);
+  },
+);
+
+// Get user's attendance records (when admin scanned them for check-in/check-out)
+export const getUserAttendance = catchAsync(
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    const attendanceRecords = await Attendance.find({ staffId: req.user.id })
+      .sort({ date: -1 })
+      .lean();
+
+    // Transform to include readable format
+    const result = attendanceRecords.map((record: any) => ({
+      _id: record._id,
+      date: record.date,
+      timeIn: record.timeIn,
+      timeOut: record.timeOut,
+      status: record.timeOut ? "Checked Out" : "In TUP",
+      scannedBy: record.scannedBy,
+    }));
 
     res.json(result);
   },
@@ -1203,5 +1254,191 @@ export const exportLogs = catchAsync(
     }
 
     return next(new AppError("Unsupported format", 400));
+  },
+);
+export const getMyLogs = catchAsync(
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+ 
+    // ── 1. Role guard ──────────────────────────────────────────────────────
+    const allowedRoles = ["Student", "Visitor", "Staff"];
+    if (!allowedRoles.includes(req.user?.role)) {
+      return next(new AppError("Access denied.", 403));
+    }
+ 
+    // ── 2. Fetch this user's logs only ────────────────────────────────────
+    const logs = await Log.find({ userId: req.user.id })
+      .populate({
+        path: "userId",
+        select: "firstName surname role photoURL birthdate",
+        options: { lean: true },
+      })
+      .populate({
+        path: "transId",                    // the staff/registrar they visited
+        select: "firstName surname role",
+        options: { lean: true },
+      })
+      .populate({
+        path: "qrId",
+        select: "qrString userId",
+        options: { lean: true },
+      })
+      .sort({ date: -1, timeIn: -1 })
+      .lean();
+ 
+    // ── 3. Group by user + date (same pattern as getStaffLogs) ───────────
+    const grouped: Record<string, any> = {};
+ 
+    for (const log of logs) {
+      const dateKey = log.date.toISOString().split("T")[0];
+      const user    = log.userId as any;
+ 
+      if (!user || !user._id) {
+        console.warn("getMyLogs: skipping log with missing user ref", log._id);
+        continue;
+      }
+ 
+      const key          = `${user._id}-${dateKey}`;
+      const logTimestamp = log.timeOut ?? log.timeIn ?? log.date;
+ 
+      if (!grouped[key]) {
+        grouped[key] = {
+          _id:         key,
+          date:        log.date,
+          user:        log.userId,
+          dailyStatus: log.status,
+          _latestTime: logTimestamp,
+          attendance:  null,
+          activities:  [],
+        };
+      }
+ 
+      // ── Attendance entry (Staff only) ──────────────────────────────────
+      if (log.reason === "attendance") {
+        grouped[key].attendance = {
+          timeIn:  log.timeIn,
+          timeOut: log.timeOut,
+          status:  log.status,
+        };
+      }
+ 
+      // ── "Went to" transaction entry (Student / Visitor / Staff) ────────
+     else if (log.reason === "transaction" || log.reason === "Transaction") {
+
+        const scannedPerson = log.transId as any;
+        const scannedQR     = log.qrId    as any;
+ 
+        grouped[key].activities.push({
+          reason:       "transaction",
+          // Who they visited — shown as "Went to: [name + role]"
+          wentTo: scannedPerson
+            ? {
+                firstName: scannedPerson.firstName,
+                surname:   scannedPerson.surname,
+                role:      scannedPerson.role,
+              }
+            : null,
+          scannedQrString: scannedQR?.qrString || null,
+          timeIn:          log.timeIn  || null,
+          timeOut:         log.timeOut || null,
+          status:          log.status,
+          scannedAt:       log.timeIn || log.timeOut || log.date,
+        });
+      }
+ 
+      // ── break / go out (Staff only, for completeness) ──────────────────
+      else if (log.reason) {
+        grouped[key].activities.push({
+          reason:  log.reason,
+          wentTo:  null,
+          timeIn:  log.timeIn  || null,
+          timeOut: log.timeOut || null,
+          status:  log.status,
+          scannedAt: log.timeIn || log.timeOut || log.date,
+        });
+      }
+ 
+      // ── Daily status: latest log wins ──────────────────────────────────
+      if (logTimestamp > grouped[key]._latestTime) {
+        grouped[key].dailyStatus = log.status;
+        grouped[key]._latestTime = logTimestamp;
+      }
+    }
+ 
+    // ── 4. Strip internal helper field ───────────────────────────────────
+    const result = Object.values(grouped).map(
+      ({ _latestTime, ...rest }) => rest,
+    );
+ 
+    // ── 5. Attach qrString to user object (same as getLogs) ──────────────
+    const userIds = Array.from(
+      new Set(
+        result
+          .filter((e: any) => e.user && e.user._id)
+          .map((e: any) => e.user._id.toString()),
+      ),
+    );
+ 
+    const qrCodes = userIds.length
+      ? await QRCode.find({ userId: { $in: userIds } })
+          .select("userId qrString")
+          .lean()
+      : [];
+ 
+    const qrMap = new Map(
+      qrCodes.map((qr: any) => [qr.userId.toString(), qr.qrString]),
+    );
+ 
+    for (const entry of result) {
+      if (entry.user && entry.user._id) {
+        entry.user = {
+          ...entry.user,
+          qrString: qrMap.get(entry.user._id.toString()) || null,
+        };
+      }
+    }
+ 
+    // ── 6. Attach Attendance records for Staff ────────────────────────────
+    if (req.user.role === "Staff" && result.length) {
+      const minDate = new Date(
+        Math.min(...result.map((e: any) => new Date(e.date).getTime())),
+      );
+      minDate.setHours(0, 0, 0, 0);
+ 
+      const maxDate = new Date(
+        Math.max(...result.map((e: any) => new Date(e.date).getTime())),
+      );
+      maxDate.setHours(23, 59, 59, 999);
+ 
+      const attends = await Attendance.find({
+        staffId: req.user.id,
+        date: { $gte: minDate, $lte: maxDate },
+      }).lean();
+ 
+      const attMap = new Map<string, any>();
+      for (const a of attends) {
+        const k = `${(a.staffId as any).toString()}-${new Date(a.date)
+          .toISOString()
+          .split("T")[0]}`;
+        attMap.set(k, a);
+      }
+ 
+      for (const entry of result) {
+        if (!entry.attendance) {
+          const k = `${entry.user._id.toString()}-${new Date(entry.date)
+            .toISOString()
+            .split("T")[0]}`;
+          const a = attMap.get(k);
+          if (a) {
+            entry.attendance = {
+              timeIn:  a.timeIn,
+              timeOut: a.timeOut,
+              status:  a.timeOut ? "Checked Out" : "In TUP",
+            };
+          }
+        }
+      }
+    }
+ 
+    return res.json(result);
   },
 );
