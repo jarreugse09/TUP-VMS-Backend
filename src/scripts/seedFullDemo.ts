@@ -8,299 +8,304 @@ import Log from "../models/Log";
 import Attendance from "../models/Attendance";
 import Activity from "../models/Activity";
 import QRRequest from "../models/QRRequest";
+
 import { generateQRString } from "../utils/qrUtils";
 
 dotenv.config();
 
+/* ================= CONFIG ================= */
+
 const MONGO = process.env.MONGODB_URI || "mongodb://localhost:27017/tup-vms";
-const START = new Date(process.env.SEED_START || "2025-01-01T00:00:00.000Z");
-const END = new Date(process.env.SEED_END || new Date().toISOString());
 
-const STUDENTS = Number(process.env.SEED_STUDENTS || 400);
-const STAFFS = Number(process.env.SEED_STAFFS || 200);
-const VISITORS = Number(process.env.SEED_VISITORS || 150);
-const demoEmailDomain = "gmail.com";
+const START = new Date("2025-10-01");
+const END = new Date("2026-04-30");
 
-function photoUrl(name: string) {
-  return `https://placehold.co/100x100?text=${encodeURIComponent(name)}`;
-}
+const TOTAL_USERS = 500;
 
-function addDays(d: Date, days: number) {
-  const out = new Date(d);
-  out.setDate(out.getDate() + days);
-  return out;
-}
+const STUDENT_COUNT = Math.floor(TOTAL_USERS * 0.8);
+const STAFF_COUNT = Math.floor(TOTAL_USERS * 0.15);
+const VISITOR_COUNT = TOTAL_USERS - STUDENT_COUNT - STAFF_COUNT;
 
-function randInt(min: number, max: number) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
+const STAFF_TYPES = ["Admin", "Guard", "Normal", "Registrar", "Teacher"];
 
-function timeOnDate(date: Date, hour: number, minute = 0) {
+const DOMAIN = "gmail.com";
+
+/* ================= HELPERS ================= */
+
+const addDays = (d: Date, days: number) => {
+  const x = new Date(d);
+  x.setDate(x.getDate() + days);
+  return x;
+};
+
+const rand = (min: number, max: number) =>
+  Math.floor(Math.random() * (max - min + 1)) + min;
+
+const chance = (p: number) => Math.random() < p;
+
+const time = (date: Date, h: number, m: number = 0) => {
   const d = new Date(date);
-  d.setHours(hour, minute, 0, 0);
+  d.setHours(h, m, 0, 0);
   return d;
-}
+};
+
+const photo = (name: string) =>
+  `https://placehold.co/100x100?text=${encodeURIComponent(name)}`;
+
+/* ================= MAIN ================= */
 
 async function run() {
   await mongoose.connect(MONGO);
-  console.log("Connected to MongoDB");
+  console.log("Connected DB");
 
-  // cleanup previous demo artifacts
-  console.log("Cleaning previous demo records...");
-  await Log.deleteMany({ demo: true as any }).catch(() => {});
-  await Attendance.deleteMany({ demo: true as any }).catch(() => {});
-  await QRCode.deleteMany({ demo: true }).catch(() => {});
-  await User.deleteMany({
-    $or: [
-      { email: { $regex: /^student\d+@gmail\.com$/i } },
-      { email: { $regex: /^staff\d+@gmail\.com$/i } },
-      { email: { $regex: /^visitor\d+@gmail\.com$/i } },
-      { email: { $regex: /^admin_seed@gmail\.com$/i } },
-    ],
+  /* ================= CLEAN ================= */
+
+  await Promise.all([
+    User.deleteMany({}),
+    QRCode.deleteMany({}),
+    Log.deleteMany({}),
+    Attendance.deleteMany({}),
+    Activity.deleteMany({}),
+    QRRequest.deleteMany({}),
+  ]);
+
+  /* ================= ADMIN ================= */
+
+  const adminPass = await bcrypt.hash("technovisitor", 10);
+
+  const admin = await User.create({
+    firstName: "TUP",
+    surname: "Admin",
+    role: "TUP",
+    email: "tup-vms@gmail.com",
+    passwordHash: adminPass,
+    birthdate: new Date("1990-01-01"),
+    photoURL: photo("TUP"),
+    status: "Active",
   });
 
-  // ensure admin exists
-  let admin = await User.findOne({ role: "TUP" }).exec();
-  let createdAdmin = false;
-  if (!admin) {
-    const pass = await bcrypt.hash("Admin123!", 10);
-    admin = await User.create({
-      firstName: "Admin",
-      surname: "Seed",
-      birthdate: new Date("1990-01-01"),
-      role: "TUP",
-      photoURL: photoUrl("Admin"),
-      email: `admin_seed@${demoEmailDomain}`,
-      passwordHash: pass,
-      status: "Active",
-      demo: true,
-    } as any);
-    createdAdmin = true;
-    console.log("Created temporary admin:", admin.email);
-  }
+  /* ================= USERS ================= */
 
-  const createdUsers: any[] = [];
-  console.log("Creating Students...");
-  for (let i = 1; i <= STUDENTS; i++) {
-    const email = `student${i}@${demoEmailDomain}`;
-    const pass = await bcrypt.hash("password123!", 10);
-    const name = `Student_${i}`;
-    const u = await User.create({
-      firstName: name,
-      surname: "Demo",
-      birthdate: new Date("2005-01-01"),
-      role: "Student",
-      photoURL: photoUrl(name),
-      email,
-      passwordHash: pass,
-      status: "Active",
-      createdAt: new Date(),
-      demo: true,
-    } as any);
-    createdUsers.push(u);
-  }
+  console.log("Creating users...");
 
-  console.log("Creating Staffs...");
-  for (let i = 1; i <= STAFFS; i++) {
-    const email = `staff${i}@${demoEmailDomain}`;
-    const pass = await bcrypt.hash("password123!", 10);
-    const name = `Staff_${i}`;
-    const u = await User.create({
-      firstName: name,
-      surname: "Demo",
-      birthdate: new Date("1990-01-01"),
-      role: "Staff",
-      photoURL: photoUrl(name),
-      email,
-      passwordHash: pass,
-      status: "Active",
-      createdAt: new Date(),
-      demo: true,
-    } as any);
-    createdUsers.push(u);
-  }
+  const users: any[] = [];
 
-  console.log("Creating Visitors...");
-  for (let i = 1; i <= VISITORS; i++) {
-    const email = `visitor${i}@${demoEmailDomain}`;
-    const pass = await bcrypt.hash("password123!", 10);
-    const name = `Visitor_${i}`;
-    const u = await User.create({
-      firstName: name,
-      surname: "Demo",
-      birthdate: new Date("1985-01-01"),
-      role: "Visitor",
-      photoURL: photoUrl(name),
-      email,
-      passwordHash: pass,
-      status: "Active",
-      createdAt: new Date(),
-      demo: true,
-    } as any);
-    createdUsers.push(u);
-  }
+  const createUsers = async (role: "Student" | "Staff" | "Visitor", count: number) => {
+    const password = await bcrypt.hash(`${role.toLowerCase()}123!`, 10);
 
-  // create QR codes
-  console.log("Creating QRCodes...");
-  const qrDocs: Record<string, any> = {};
-  const usedQRs = new Set<string>();
-  for (const u of createdUsers) {
-    let qrString = generateQRString(u.role);
-    while (usedQRs.has(qrString)) qrString = generateQRString(u.role);
-    usedQRs.add(qrString);
-    const qr = await QRCode.create({
+    for (let i = 1; i <= count; i++) {
+      users.push({
+        firstName: `${role}_${i}`,
+        surname: "Demo",
+        birthdate:
+          role === "Student"
+            ? new Date("2005-01-01")
+            : new Date("1990-01-01"),
+        role,
+        staffType:
+          role === "Staff"
+            ? STAFF_TYPES[rand(0, STAFF_TYPES.length - 1)]
+            : undefined,
+        email: `${role.toLowerCase()}_${i}@${DOMAIN}`,
+        passwordHash: password,
+        photoURL: photo(`${role}_${i}`),
+        status: "Active",
+        mustCapturePhoto: false,
+        createdAt: new Date(),
+      });
+    }
+  };
+
+  await createUsers("Student", STUDENT_COUNT);
+  await createUsers("Staff", STAFF_COUNT);
+  await createUsers("Visitor", VISITOR_COUNT);
+
+  const insertedUsers = await User.insertMany(users);
+
+  /* ================= QR ================= */
+
+  console.log("Creating QR codes...");
+
+  const qrDocs: any[] = [];
+  const userQRMap: Record<string, any> = {};
+
+  for (const u of insertedUsers) {
+    const qr = generateQRString(u.role);
+
+    const qrDoc = {
       userId: u._id,
-      qrString,
+      qrString: qr,
       isActive: true,
-      demo: true,
-    });
-    qrDocs[u._id.toString()] = qr;
+    };
+
+    qrDocs.push(qrDoc);
   }
 
-  // create QR requests
+  const insertedQRs = await QRCode.insertMany(qrDocs);
+
+  insertedQRs.forEach((qr) => {
+    userQRMap[qr.userId.toString()] = qr;
+  });
+
+  /* ================= QR REQUESTS ================= */
+
   console.log("Creating QR Requests...");
-  const reasons = [
-    "Damaged QR",
-    "Lost ID",
-    "Smudged Print",
-    "Worn Out",
-    "Incorrect Info",
-  ];
-  const requestUsers = createdUsers.filter((u) => u.role !== "TUP");
-  for (let i = 0; i < 10; i++) {
-    const u = requestUsers[Math.floor(Math.random() * requestUsers.length)];
-    const oldQR =
-      qrDocs[u._id.toString()]?.qrString || generateQRString(u.role);
-    const reason = reasons[Math.floor(Math.random() * reasons.length)];
-    await QRRequest.create({
-      userId: u._id,
-      oldQR,
-      reason,
-      newQRImage: "https://placehold.co/300x300?text=New%20QR",
-      status: "Pending",
-    } as any);
+
+  const qrRequests: any[] = [];
+
+  for (const u of insertedUsers) {
+    if (chance(0.08)) {
+      const type = chance(0.7) ? "QR" : "PROFILE_PHOTO";
+
+      const statusRand = Math.random();
+      let status: "Pending" | "Approved" | "Rejected" = "Pending";
+
+      if (statusRand < 0.7) status = "Approved";
+      else if (statusRand < 0.9) status = "Pending";
+      else status = "Rejected";
+
+      const qrData = userQRMap[u._id.toString()];
+
+      qrRequests.push({
+        userId: u._id,
+        requestType: type,
+        oldQR: qrData?.qrString,
+        reason: ["Lost ID", "Damaged QR", "Update Info"][rand(0, 2)],
+        newQRString: type === "QR" && status === "Approved"
+          ? generateQRString(u.role)
+          : undefined,
+        newQRImage: type === "QR" ? "https://placehold.co/300x300" : undefined,
+        oldPhotoURL: type === "PROFILE_PHOTO" ? u.photoURL : undefined,
+        newPhotoImage: type === "PROFILE_PHOTO" ? photo("NEW") : undefined,
+        status,
+        approvedBy: status === "Approved" ? admin._id : undefined,
+      });
+    }
   }
 
-  // iterate dates and create logs/attendance/activities
-  console.log(
-    "Seeding logs, attendance, activities from",
-    START.toISOString(),
-    "to",
-    END.toISOString(),
-  );
-  let date = new Date(START);
-  let totalLogs = 0;
-  let totalAtt = 0;
-  let totalActs = 0;
+  await QRRequest.insertMany(qrRequests);
 
-  const students = createdUsers.filter((u) => u.role === "Student");
-  const staffs = createdUsers.filter((u) => u.role === "Staff");
-  const visitors = createdUsers.filter((u) => u.role === "Visitor");
+  /* ================= DATA ================= */
+
+  console.log("Generating logs, attendance, transactions...");
+
+  const logs: any[] = [];
+  const attendance: any[] = [];
+  const activities: any[] = [];
+
+  let date = new Date(START);
 
   while (date <= END) {
-    const day = date.getDay(); // 0 sunday, 6 saturday
+    const day = date.getDay();
 
-    // STAFF attendance + logs on weekdays
-    if (day !== 0 && day !== 6) {
-      for (const s of staffs) {
-        const timeIn = timeOnDate(date, 8, randInt(0, 30));
-        const timeOut = timeOnDate(date, 17, randInt(0, 60));
-        await Attendance.create({
-          staffId: s._id,
-          date,
-          timeIn,
-          timeOut,
-          scannedBy: admin!._id,
-          demo: true,
-        } as any);
-        totalAtt++;
+    const activeUsers: string[] = [];
 
-        await Log.create({
-          userId: s._id,
-          qrId: qrDocs[s._id.toString()]._id,
+    for (const u of insertedUsers) {
+      const id = u._id.toString();
+      const qr = userQRMap[id];
+
+      /* ===== STAFF ATTENDANCE ===== */
+      if (u.role === "Staff" && day !== 0 && day !== 6) {
+        const tin = time(date, 8, rand(0, 30));
+        const tout = time(date, 17, rand(0, 60));
+
+        attendance.push({
+          staffId: u._id,
           date,
-          timeIn,
-          timeOut,
+          timeIn: tin,
+          timeOut: tout,
+          scannedBy: admin._id,
+        });
+
+        logs.push({
+          userId: u._id,
+          qrId: qr._id,
+          date,
+          timeIn: tin,
+          timeOut: tout,
           status: "Checked Out",
-          scannedBy: admin!._id,
-          demo: true,
-        } as any);
-        totalLogs++;
+          reason: "attendance",
+          scannedBy: admin._id,
+        });
+
+        activeUsers.push(id);
+      }
+
+      /* ===== STUDENT / VISITOR ===== */
+      if (
+        (u.role === "Student" || u.role === "Visitor") &&
+        day !== 0 &&
+        day !== 6 &&
+        chance(0.8)
+      ) {
+        const tin = time(date, rand(7, 9), rand(0, 59));
+        const hasOut = chance(0.9);
+        const tout = hasOut ? time(date, rand(15, 18), rand(0, 59)) : null;
+
+        logs.push({
+          userId: u._id,
+          qrId: qr._id,
+          date,
+          timeIn: tin,
+          timeOut: tout,
+          status: tout ? "Checked Out" : "In TUP",
+          reason: "checkin",
+          scannedBy: admin._id,
+        });
+
+        activeUsers.push(id);
       }
     }
 
-    // STUDENT logs: weekdays, most students attend
-    if (day !== 0 && day !== 6) {
-      for (const st of students) {
-        if (Math.random() < 0.8) {
-          const inT = timeOnDate(date, 8, randInt(0, 45));
-          const outT =
-            Math.random() < 0.9
-              ? timeOnDate(date, 15 + randInt(0, 2), randInt(0, 59))
-              : null;
-          await Log.create({
-            userId: st._id,
-            qrId: qrDocs[st._id.toString()]._id,
-            date,
-            timeIn: inT,
-            timeOut: outT,
-            status: outT ? "Checked Out" : "In TUP",
-            scannedBy: admin!._id,
-            demo: true,
-          } as any);
-          totalLogs++;
-        }
-      }
-    }
+    /* ===== TRANSACTIONS ===== */
+    const transCount = rand(2, 8);
 
-    // VISITOR logs: random, few per day
-    const visitorsToday = randInt(0, 3);
-    for (let i = 0; i < visitorsToday; i++) {
-      const v = visitors[randInt(0, visitors.length - 1)];
-      const inT = timeOnDate(date, randInt(8, 16), randInt(0, 59));
-      const outT = Math.random() < 0.9 ? addDays(inT, 0) : null; // same day checkout most
-      await Log.create({
-        userId: v._id,
-        qrId: qrDocs[v._id.toString()]._id,
-        date,
-        timeIn: inT,
-        timeOut: outT,
-        status: outT ? "Checked Out" : "In TUP",
-        scannedBy: admin!._id,
-        demo: true,
-      } as any);
-      totalLogs++;
-    }
+    for (let i = 0; i < transCount; i++) {
+      if (activeUsers.length < 2) break;
 
-    // Random activities between users
-    const activitiesToday = randInt(0, 5);
-    for (let a = 0; a < activitiesToday; a++) {
-      const from = createdUsers[randInt(0, createdUsers.length - 1)];
-      let to = createdUsers[randInt(0, createdUsers.length - 1)];
-      if (to._id.toString() === from._id.toString()) continue;
-      const activityType = ["Delivery", "Meeting", "Assistance"][randInt(0, 2)];
-      const fromQR = qrDocs[from._id.toString()]?.qrString || "";
-      await Activity.create({
-        fromUserId: from._id,
-        toUserId: to._id,
-        fromQR,
-        toQR: qrDocs[to._id.toString()]?.qrString || "",
-        activityType,
-        demo: true,
+      const from = activeUsers[rand(0, activeUsers.length - 1)];
+      const to = activeUsers[rand(0, activeUsers.length - 1)];
+
+      if (from === to) continue;
+
+      const toQR = userQRMap[to];
+
+      logs.push({
+        userId: from,
+        transId: to,
+        qrId: toQR._id,
         date,
-      } as any);
-      totalActs++;
+        timeIn: new Date(date),
+        status: "Transaction",
+        reason: "transaction",
+        scannedBy: from,
+      });
+
+      activities.push({
+        fromUserId: from,
+        toUserId: to,
+        fromQR: userQRMap[from].qrString,
+        toQR: userQRMap[to].qrString,
+        activityType: ["Transaction", "Meeting", "Assistance"][rand(0, 2)],
+        timestamp: new Date(date),
+      });
     }
 
     date = addDays(date, 1);
   }
 
-  console.log(
-    `Created ${createdUsers.length} users, ${totalAtt} attendance records, ${totalLogs} logs, ${totalActs} activities`,
-  );
-  if (createdAdmin)
-    console.log("Created temporary admin account for scanning:", admin!.email);
-  console.log("Seeding complete.");
+  /* ================= BULK INSERT ================= */
+
+  console.log("Inserting logs...");
+  await Log.insertMany(logs, { ordered: false });
+
+  console.log("Inserting attendance...");
+  await Attendance.insertMany(attendance, { ordered: false });
+
+  console.log("Inserting activities...");
+  await Activity.insertMany(activities, { ordered: false });
+
+  console.log("✅ SEED COMPLETE");
   process.exit(0);
 }
 
