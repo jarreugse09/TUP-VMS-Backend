@@ -30,7 +30,11 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-const profileUploadDir = path.join(process.cwd(), "uploads", "profile-requests");
+const profileUploadDir = path.join(
+  process.cwd(),
+  "uploads",
+  "profile-requests",
+);
 if (!fs.existsSync(profileUploadDir)) {
   fs.mkdirSync(profileUploadDir, { recursive: true });
 }

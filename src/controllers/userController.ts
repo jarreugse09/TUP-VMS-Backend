@@ -91,7 +91,9 @@ export const requestProfilePhotoChange = async (
     }
 
     const path = require("path");
-    const relPath = path.relative(process.cwd(), req.file.path).replace(/\\/g, "/");
+    const relPath = path
+      .relative(process.cwd(), req.file.path)
+      .replace(/\\/g, "/");
 
     const request = new QRRequest({
       userId: user._id,
@@ -185,7 +187,8 @@ export const approveQRRequest = async (req: AuthRequest, res: Response) => {
 
       // Use the user's supplied QR string if present, otherwise generate a new one
       const userObj = await User.findById(request.userId);
-      const newQRString = request.newQRString || generateQRString(userObj!.role);
+      const newQRString =
+        request.newQRString || generateQRString(userObj!.role);
 
       qrCode.qrString = newQRString;
       qrCode.updatedAt = new Date();
