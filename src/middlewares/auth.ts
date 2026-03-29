@@ -77,3 +77,24 @@ export const authorizeRoleOrStaffType = (
     next();
   };
 };
+
+// ── API Key Authentication (for CCTV webhook) ─────────────────────────────────
+export const authenticateApiKey = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const apiKey = req.headers["x-api-key"];
+  const expectedApiKey = process.env.CCTV_API_KEY;
+
+  if (!expectedApiKey) {
+    console.error("[Auth] CCTV_API_KEY environment variable is not set");
+    return res.status(500).json({ message: "Server configuration error" });
+  }
+
+  if (!apiKey || apiKey !== expectedApiKey) {
+    return res.status(401).json({ message: "Invalid or missing API key" });
+  }
+
+  next();
+};
