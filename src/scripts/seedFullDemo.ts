@@ -17,10 +17,10 @@ dotenv.config();
 
 const MONGO = process.env.MONGODB_URI || "mongodb://localhost:27017/tup-vms";
 
-const START = new Date("2025-10-01");
+const START = new Date("2026-01-01");
 const END = new Date("2026-04-30");
 
-const TOTAL_USERS = 500;
+const TOTAL_USERS = 200; // 🔥 SMALL DATA FOR REAL LOGIN TESTING
 
 const STUDENT_COUNT = Math.floor(TOTAL_USERS * 0.8);
 const STAFF_COUNT = Math.floor(TOTAL_USERS * 0.15);
@@ -29,6 +29,9 @@ const VISITOR_COUNT = TOTAL_USERS - STUDENT_COUNT - STAFF_COUNT;
 const STAFF_TYPES = ["Admin", "Guard", "Normal", "Registrar", "Teacher"];
 
 const DOMAIN = "gmail.com";
+
+// 🔥 reduced transactions for performance
+const TRANSACTION_SCALE = 0.4; // 60% reduction in transactions
 
 /* ================= HELPERS ================= */
 
@@ -90,7 +93,10 @@ async function run() {
 
   const users: any[] = [];
 
-  const createUsers = async (role: "Student" | "Staff" | "Visitor", count: number) => {
+  const createUsers = async (
+    role: "Student" | "Staff" | "Visitor",
+    count: number
+  ) => {
     const password = await bcrypt.hash(`${role.toLowerCase()}123!`, 10);
 
     for (let i = 1; i <= count; i++) {
@@ -130,15 +136,11 @@ async function run() {
   const userQRMap: Record<string, any> = {};
 
   for (const u of insertedUsers) {
-    const qr = generateQRString(u.role);
-
-    const qrDoc = {
+    qrDocs.push({
       userId: u._id,
-      qrString: qr,
+      qrString: generateQRString(u.role),
       isActive: true,
-    };
-
-    qrDocs.push(qrDoc);
+    });
   }
 
   const insertedQRs = await QRCode.insertMany(qrDocs);
@@ -154,14 +156,14 @@ async function run() {
   const qrRequests: any[] = [];
 
   for (const u of insertedUsers) {
-    if (chance(0.08)) {
+    if (chance(0.05)) {
       const type = chance(0.7) ? "QR" : "PROFILE_PHOTO";
 
-      const statusRand = Math.random();
       let status: "Pending" | "Approved" | "Rejected" = "Pending";
+      const r = Math.random();
 
-      if (statusRand < 0.7) status = "Approved";
-      else if (statusRand < 0.9) status = "Pending";
+      if (r < 0.7) status = "Approved";
+      else if (r < 0.9) status = "Pending";
       else status = "Rejected";
 
       const qrData = userQRMap[u._id.toString()];
@@ -171,9 +173,10 @@ async function run() {
         requestType: type,
         oldQR: qrData?.qrString,
         reason: ["Lost ID", "Damaged QR", "Update Info"][rand(0, 2)],
-        newQRString: type === "QR" && status === "Approved"
-          ? generateQRString(u.role)
-          : undefined,
+        newQRString:
+          type === "QR" && status === "Approved"
+            ? generateQRString(u.role)
+            : undefined,
         newQRImage: type === "QR" ? "https://placehold.co/300x300" : undefined,
         oldPhotoURL: type === "PROFILE_PHOTO" ? u.photoURL : undefined,
         newPhotoImage: type === "PROFILE_PHOTO" ? photo("NEW") : undefined,
@@ -197,14 +200,15 @@ async function run() {
 
   while (date <= END) {
     const day = date.getDay();
-
     const activeUsers: string[] = [];
 
     for (const u of insertedUsers) {
       const id = u._id.toString();
       const qr = userQRMap[id];
 
-      /* ===== STAFF ATTENDANCE ===== */
+      if (!qr) continue;
+
+      /* ===== WEEKDAY STAFF ===== */
       if (u.role === "Staff" && day !== 0 && day !== 6) {
         const tin = time(date, 8, rand(0, 30));
         const tout = time(date, 17, rand(0, 60));
@@ -231,16 +235,17 @@ async function run() {
         activeUsers.push(id);
       }
 
-      /* ===== STUDENT / VISITOR ===== */
+      /* ===== WEEKDAY STUDENTS / VISITORS ===== */
       if (
         (u.role === "Student" || u.role === "Visitor") &&
         day !== 0 &&
         day !== 6 &&
-        chance(0.8)
+        chance(0.7)
       ) {
         const tin = time(date, rand(7, 9), rand(0, 59));
-        const hasOut = chance(0.9);
-        const tout = hasOut ? time(date, rand(15, 18), rand(0, 59)) : null;
+        const tout = chance(0.9)
+          ? time(date, rand(15, 18), rand(0, 59))
+          : null;
 
         logs.push({
           userId: u._id,
@@ -255,10 +260,109 @@ async function run() {
 
         activeUsers.push(id);
       }
+
+      /* ===== SATURDAY ===== */
+
+      if (u.role === "Student" && day === 6 && chance(0.08)) {
+        const tin = time(date, rand(8, 10), rand(0, 59));
+        const tout = chance(0.8)
+          ? time(date, rand(13, 17), rand(0, 59))
+          : null;
+
+        logs.push({
+          userId: u._id,
+          qrId: qr._id,
+          date,
+          timeIn: tin,
+          timeOut: tout,
+          status: tout ? "Checked Out" : "In TUP",
+          reason: "weekend",
+          scannedBy: admin._id,
+        });
+
+        activeUsers.push(id);
+      }
+
+      if (u.role === "Staff" && day === 6 && chance(0.5)) {
+        const tin = time(date, rand(8, 9), rand(0, 59));
+        const tout = time(date, rand(12, 16), rand(0, 59));
+
+        attendance.push({
+          staffId: u._id,
+          date,
+          timeIn: tin,
+          timeOut: tout,
+          scannedBy: admin._id,
+        });
+
+        logs.push({
+          userId: u._id,
+          qrId: qr._id,
+          date,
+          timeIn: tin,
+          timeOut: tout,
+          status: "Checked Out",
+          reason: "weekend-attendance",
+          scannedBy: admin._id,
+        });
+
+        activeUsers.push(id);
+      }
+
+      if (u.role === "Visitor" && day === 6 && chance(0.2)) {
+        const tin = time(date, rand(9, 11), rand(0, 59));
+        const tout = chance(0.8)
+          ? time(date, rand(14, 17), rand(0, 59))
+          : null;
+
+        logs.push({
+          userId: u._id,
+          qrId: qr._id,
+          date,
+          timeIn: tin,
+          timeOut: tout,
+          status: tout ? "Checked Out" : "In TUP",
+          reason: "visit",
+          scannedBy: admin._id,
+        });
+
+        activeUsers.push(id);
+      }
+
+      /* ===== SUNDAY (STAFF ONLY) ===== */
+      if (u.role === "Staff" && day === 0 && chance(0.05)) {
+        const tin = time(date, 8, rand(0, 30));
+        const tout = time(date, 12, rand(0, 59));
+
+        attendance.push({
+          staffId: u._id,
+          date,
+          timeIn: tin,
+          timeOut: tout,
+          scannedBy: admin._id,
+        });
+
+        logs.push({
+          userId: u._id,
+          qrId: qr._id,
+          date,
+          timeIn: tin,
+          timeOut: tout,
+          status: "Checked Out",
+          reason: "sunday-duty",
+          scannedBy: admin._id,
+        });
+
+        activeUsers.push(id);
+      }
     }
 
     /* ===== TRANSACTIONS ===== */
-    const transCount = rand(2, 8);
+
+    const transCount = Math.max(
+      1,
+      Math.floor(rand(1, 5) * TRANSACTION_SCALE)
+    );
 
     for (let i = 0; i < transCount; i++) {
       if (activeUsers.length < 2) break;
@@ -268,7 +372,10 @@ async function run() {
 
       if (from === to) continue;
 
+      const fromQR = userQRMap[from];
       const toQR = userQRMap[to];
+
+      if (!fromQR || !toQR) continue;
 
       logs.push({
         userId: from,
@@ -284,8 +391,8 @@ async function run() {
       activities.push({
         fromUserId: from,
         toUserId: to,
-        fromQR: userQRMap[from].qrString,
-        toQR: userQRMap[to].qrString,
+        fromQR: fromQR.qrString,
+        toQR: toQR.qrString,
         activityType: ["Transaction", "Meeting", "Assistance"][rand(0, 2)],
         timestamp: new Date(date),
       });
@@ -294,7 +401,7 @@ async function run() {
     date = addDays(date, 1);
   }
 
-  /* ================= BULK INSERT ================= */
+  /* ================= INSERT ================= */
 
   console.log("Inserting logs...");
   await Log.insertMany(logs, { ordered: false });
@@ -305,7 +412,7 @@ async function run() {
   console.log("Inserting activities...");
   await Activity.insertMany(activities, { ordered: false });
 
-  console.log("✅ SEED COMPLETE");
+  console.log("✅ SEED COMPLETE (LIGHTWEIGHT)");
   process.exit(0);
 }
 
