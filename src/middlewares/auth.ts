@@ -40,6 +40,13 @@ export const authorizeRoles = (...roles: string[]) => {
   };
 };
 
+export const isSecurityAccount = (user: any): boolean => {
+  const userRole = String(user?.role || "").trim().toLowerCase();
+  const userStaffType = String(user?.staffType || "").trim().toLowerCase();
+
+  return userRole === "security" || (userRole === "staff" && userStaffType === "security");
+};
+
 
 
 
@@ -76,6 +83,24 @@ export const authorizeRoleOrStaffType = (
 
     next();
   };
+};
+
+export const authorizeAlertAudience = (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  if (!req.user) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  const userRole = String(req.user?.role || "").trim().toLowerCase();
+  if (userRole === "tup" || isSecurityAccount(req.user)) {
+    next();
+    return;
+  }
+
+  return res.status(403).json({ message: "Insufficient permissions" });
 };
 
 // ── API Key Authentication (for CCTV webhook) ─────────────────────────────────

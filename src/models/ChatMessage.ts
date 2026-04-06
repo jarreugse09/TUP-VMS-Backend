@@ -2,9 +2,9 @@ import mongoose, { Document, Schema } from "mongoose";
 
 export interface IChatMessage extends Document {
     _id: mongoose.Types.ObjectId;
-    senderId: mongoose.Types.ObjectId;
+    senderId?: mongoose.Types.ObjectId;
     senderName: string;
-    senderRole: "TUP" | "Security";
+    senderRole: "TUP" | "Staff" | "Security" | "System";
     recipientId?: mongoose.Types.ObjectId;
     message: string;
     isRead: boolean;
@@ -14,11 +14,11 @@ export interface IChatMessage extends Document {
 
 const ChatMessageSchema: Schema = new Schema(
     {
-        senderId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+        senderId: { type: Schema.Types.ObjectId, ref: "User" },
         senderName: { type: String, required: true },
         senderRole: {
             type: String,
-            enum: ["TUP", "Security"],
+            enum: ["TUP", "Staff", "Security", "System"],
             required: true,
         },
         recipientId: { type: Schema.Types.ObjectId, ref: "User" },

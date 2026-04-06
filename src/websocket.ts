@@ -10,7 +10,48 @@ interface AuthenticatedWebSocket extends WebSocket {
     userName?: string;
 }
 
-const connectedClients = new Map<string, AuthenticatedWebSocket>();
+const connectedClients = new Map<string, Set<AuthenticatedWebSocket>>();
+
+function addClientConnection(userId: string, ws: AuthenticatedWebSocket) {
+    const existing = connectedClients.get(userId) || new Set<AuthenticatedWebSocket>();
+    existing.add(ws);
+    connectedClients.set(userId, existing);
+}
+
+function removeClientConnection(userId: string, ws: AuthenticatedWebSocket) {
+    const existing = connectedClients.get(userId);
+    if (!existing) return;
+    existing.delete(ws);
+    if (existing.size === 0) {
+        connectedClients.delete(userId);
+    }
+}
+
+function sendToUser(userId: string, payload: unknown) {
+    const sockets = connectedClients.get(userId);
+    if (!sockets) return;
+    const serialized = JSON.stringify(payload);
+    sockets.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(serialized);
+        }
+    });
+}
+
+function sendToUsers(userIds: string[], payload: unknown) {
+    userIds.forEach((userId) => sendToUser(userId, payload));
+}
+
+function broadcast(payload: unknown) {
+    const serialized = JSON.stringify(payload);
+    connectedClients.forEach((sockets) => {
+        sockets.forEach((client) => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(serialized);
+            }
+        });
+    });
+}
 
 export function setupWebSocket(server: Server) {
     const wss = new WebSocketServer({ server });
@@ -34,13 +75,16 @@ export function setupWebSocket(server: Server) {
                 process.env.JWT_SECRET || "your-secret-key"
             ) as any;
 
-            ws.userId = decoded.userId;
-            ws.userRole = decoded.role;
+            ws.userId = decoded.id || decoded.userId;
+            ws.userRole =
+                decoded.role === "Staff" && decoded.staffType === "Security"
+                    ? "Security"
+                    : decoded.role;
             ws.userName = decoded.name || "Unknown";
 
             // Store connection
             if (ws.userId) {
-                connectedClients.set(ws.userId, ws);
+                addClientConnection(ws.userId, ws);
                 console.log(`User ${ws.userName} (${ws.userId}) connected via WebSocket`);
             }
 
@@ -72,7 +116,7 @@ export function setupWebSocket(server: Server) {
             // Handle disconnection
             ws.on("close", () => {
                 if (ws.userId) {
-                    connectedClients.delete(ws.userId);
+                    removeClientConnection(ws.userId, ws);
                     console.log(`User ${ws.userName} (${ws.userId}) disconnected`);
                 }
             });
@@ -132,48 +176,26 @@ async function handleChatMessage(
     }
 
     // Save message to database
-    const chatMessage = new ChatMessage({
-        sender: ws.userId,
+    const chatMessage = await ChatMessage.create({
+        senderId: ws.userId,
         senderName: ws.userName,
         senderRole: ws.userRole,
-        content: message.content,
-        recipient: message.recipientId || null,
-        isGroupMessage: !message.recipientId,
+        recipientId: message.recipientId || null,
+        message: message.content,
     });
 
-    await chatMessage.save();
-
     // Broadcast to all connected clients (or specific recipient)
-    const broadcastMessage = {
-        type: "NEW_CHAT_MESSAGE",
-        message: {
-            _id: chatMessage._id,
-            sender: chatMessage.sender,
-            senderName: chatMessage.senderName,
-            senderRole: chatMessage.senderRole,
-            content: chatMessage.content,
-            recipient: chatMessage.recipient,
-            isGroupMessage: chatMessage.isGroupMessage,
-            createdAt: chatMessage.createdAt,
-        },
-    };
+    const broadcastMessage = buildChatBroadcastMessage(chatMessage);
 
     if (message.recipientId) {
         // Send to specific recipient and sender
-        const recipientWs = connectedClients.get(message.recipientId);
-        if (recipientWs && recipientWs.readyState === WebSocket.OPEN) {
-            recipientWs.send(JSON.stringify(broadcastMessage));
-        }
-        if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(broadcastMessage));
+        sendToUser(message.recipientId, broadcastMessage);
+        if (ws.userId) {
+            sendToUser(ws.userId, broadcastMessage);
         }
     } else {
         // Broadcast to all connected clients
-        connectedClients.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify(broadcastMessage));
-            }
-        });
+        broadcast(broadcastMessage);
     }
 }
 
@@ -185,22 +207,30 @@ async function handleMarkAlertRead(
         return;
     }
 
-    await Alert.findByIdAndUpdate(message.alertId, {
-        $addToSet: { readBy: ws.userId },
-    });
-
-    // Broadcast read status to all clients
-    const broadcastMessage = {
-        type: "ALERT_READ",
-        alertId: message.alertId,
-        userId: ws.userId,
-    };
-
-    connectedClients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify(broadcastMessage));
+    await Alert.findOneAndUpdate(
+        {
+            _id: message.alertId,
+            "recipientStates.userId": ws.userId,
+        },
+        {
+            $set: {
+                "recipientStates.$[recipient].isRead": true,
+                "recipientStates.$[recipient].readAt": new Date(),
+            },
+        },
+        {
+            arrayFilters: [{ "recipient.userId": ws.userId }],
         }
-    });
+    );
+
+    sendToUser(
+        ws.userId,
+        {
+            type: "ALERT_READ",
+            alertId: message.alertId,
+            userId: ws.userId,
+        }
+    );
 }
 
 async function handleMarkChatRead(
@@ -211,26 +241,113 @@ async function handleMarkChatRead(
         return;
     }
 
-    await ChatMessage.findByIdAndUpdate(message.messageId, {
-        $addToSet: { readBy: ws.userId },
-    });
+    await ChatMessage.findOneAndUpdate(
+        {
+            _id: message.messageId,
+            recipientId: ws.userId,
+        },
+        {
+            isRead: true,
+            readAt: new Date(),
+        }
+    );
 }
 
-// Export function to broadcast alerts to all connected clients
-export function broadcastAlert(alert: any) {
+export function broadcastAlert(alert: any, userId?: string) {
     const message = {
         type: "NEW_ALERT",
         alert,
     };
 
-    connectedClients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify(message));
-        }
-    });
+    if (userId) {
+        sendToUser(userId, message);
+        return;
+    }
+
+    broadcast(message);
+}
+
+export function broadcastAlertRead(alertId: string, userId?: string) {
+    const message = {
+        type: "ALERT_READ",
+        alertId,
+        userId: userId || null,
+    };
+
+    if (userId) {
+        sendToUser(userId, message);
+        return;
+    }
+
+    broadcast(message);
+}
+
+export function broadcastAllAlertsRead(userId?: string) {
+    const message = {
+        type: "ALL_ALERTS_READ",
+        userId: userId || null,
+    };
+
+    if (userId) {
+        sendToUser(userId, message);
+        return;
+    }
+
+    broadcast(message);
+}
+
+export function broadcastAlertUpdated(alert: any, userId?: string) {
+    const message = {
+        type: "ALERT_UPDATED",
+        alert,
+    };
+
+    if (userId) {
+        sendToUser(userId, message);
+        return;
+    }
+
+    broadcast(message);
+}
+
+function buildChatBroadcastMessage(chatMessage: any) {
+    return {
+        type: "NEW_CHAT_MESSAGE",
+        message: {
+            _id: String(chatMessage._id),
+            senderId: chatMessage.senderId ? String(chatMessage.senderId) : null,
+            senderName: chatMessage.senderName,
+            senderRole: chatMessage.senderRole,
+            recipientId: chatMessage.recipientId ? String(chatMessage.recipientId) : null,
+            message: chatMessage.message,
+            isRead: Boolean(chatMessage.isRead),
+            createdAt: chatMessage.createdAt,
+        },
+    };
+}
+
+export function broadcastChatMessage(chatMessage: any, recipientUserIds?: string[]) {
+    const message = buildChatBroadcastMessage(chatMessage);
+
+    if (recipientUserIds && recipientUserIds.length > 0) {
+        sendToUsers(recipientUserIds, message);
+        return;
+    }
+
+    if (chatMessage.recipientId) {
+        const recipientId = String(chatMessage.recipientId);
+        sendToUsers([recipientId], message);
+        return;
+    }
+
+    broadcast(message);
 }
 
 // Export function to get connected clients count
 export function getConnectedClientsCount(): number {
-    return connectedClients.size;
+    let total = 0;
+    connectedClients.forEach((sockets) => {
+        total += sockets.size;
+    });
+    return total;
 }

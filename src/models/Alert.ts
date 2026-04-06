@@ -7,15 +7,41 @@ export interface IAlert extends Document {
     message: string;
     cameraSource: string;
     detectionLabel: string;
+    detectedObjects?: string[];
     confidence: number;
     severity: "critical" | "high" | "medium" | "low";
     imageUrl?: string;
-    isRead: boolean;
-    readBy?: mongoose.Types.ObjectId;
-    readAt?: Date;
+    recipientStates: Array<{
+        userId: mongoose.Types.ObjectId;
+        isRead: boolean;
+        readAt?: Date;
+        incidentStatus: "new" | "acknowledged" | "in_progress" | "resolved";
+        acknowledgedBy?: mongoose.Types.ObjectId;
+        acknowledgedAt?: Date;
+        resolvedBy?: mongoose.Types.ObjectId;
+        resolvedAt?: Date;
+    }>;
     createdAt: Date;
     updatedAt: Date;
 }
+
+const AlertRecipientStateSchema = new Schema(
+    {
+        userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+        isRead: { type: Boolean, default: false },
+        readAt: { type: Date },
+        incidentStatus: {
+            type: String,
+            enum: ["new", "acknowledged", "in_progress", "resolved"],
+            default: "new",
+        },
+        acknowledgedBy: { type: Schema.Types.ObjectId, ref: "User" },
+        acknowledgedAt: { type: Date },
+        resolvedBy: { type: Schema.Types.ObjectId, ref: "User" },
+        resolvedAt: { type: Date },
+    },
+    { _id: false }
+);
 
 const AlertSchema: Schema = new Schema(
     {
@@ -28,6 +54,7 @@ const AlertSchema: Schema = new Schema(
         message: { type: String, required: true },
         cameraSource: { type: String, required: true },
         detectionLabel: { type: String, required: true },
+        detectedObjects: [{ type: String }],
         confidence: { type: Number, required: true, min: 0, max: 1 },
         severity: {
             type: String,
@@ -35,9 +62,10 @@ const AlertSchema: Schema = new Schema(
             required: true,
         },
         imageUrl: { type: String },
-        isRead: { type: Boolean, default: false },
-        readBy: { type: Schema.Types.ObjectId, ref: "User" },
-        readAt: { type: Date },
+        recipientStates: {
+            type: [AlertRecipientStateSchema],
+            default: [],
+        },
     },
     {
         timestamps: true,
@@ -46,8 +74,9 @@ const AlertSchema: Schema = new Schema(
 
 // Performance indexes
 AlertSchema.index({ createdAt: -1 });
-AlertSchema.index({ isRead: 1, createdAt: -1 });
 AlertSchema.index({ type: 1, createdAt: -1 });
 AlertSchema.index({ severity: 1, createdAt: -1 });
+AlertSchema.index({ "recipientStates.userId": 1, createdAt: -1 });
+AlertSchema.index({ "recipientStates.userId": 1, "recipientStates.isRead": 1, createdAt: -1 });
 
 export default mongoose.model<IAlert>("Alert", AlertSchema);

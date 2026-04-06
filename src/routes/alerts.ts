@@ -6,11 +6,13 @@ import {
     markAsRead,
     markAllAsRead,
     deleteAlert,
+    updateIncidentStatus,
 } from "../controllers/alertController";
 import {
     authenticateToken,
     authorizeRoles,
     authenticateApiKey,
+    authorizeAlertAudience,
 } from "../middlewares/auth";
 
 const router = express.Router();
@@ -19,10 +21,11 @@ const router = express.Router();
 router.post("/", authenticateApiKey, createAlert);
 
 // ── Authenticated Routes ──────────────────────────────────────────────────────
-router.get("/", authenticateToken, authorizeRoles("TUP", "Security"), getAlerts);
-router.get("/unread-count", authenticateToken, authorizeRoles("TUP", "Security"), getUnreadCount);
-router.patch("/:id/read", authenticateToken, authorizeRoles("TUP", "Security"), markAsRead);
-router.patch("/read-all", authenticateToken, authorizeRoles("TUP", "Security"), markAllAsRead);
+router.get("/", authenticateToken, authorizeAlertAudience, getAlerts);
+router.get("/unread-count", authenticateToken, authorizeAlertAudience, getUnreadCount);
+router.patch("/:id/read", authenticateToken, authorizeAlertAudience, markAsRead);
+router.patch("/read-all", authenticateToken, authorizeAlertAudience, markAllAsRead);
+router.patch("/:id/status", authenticateToken, authorizeAlertAudience, updateIncidentStatus);
 router.delete("/:id", authenticateToken, authorizeRoles("TUP"), deleteAlert);
 
 export default router;

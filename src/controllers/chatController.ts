@@ -3,10 +3,30 @@ import ChatMessage from "../models/ChatMessage";
 import User from "../models/User";
 import { catchAsync } from "../utils/catchAsync";
 import { AppError } from "../utils/AppError";
+import { broadcastChatMessage } from "../websocket";
 
 interface AuthRequest extends Request {
     user?: any;
 }
+
+const normalizeChatMessage = (message: any) => ({
+    _id: String(message._id),
+    senderId: message.senderId?._id
+        ? String(message.senderId._id)
+        : message.senderId
+          ? String(message.senderId)
+          : null,
+    senderName: message.senderName,
+    senderRole: message.senderRole,
+    recipientId: message.recipientId?._id
+        ? String(message.recipientId._id)
+        : message.recipientId
+          ? String(message.recipientId)
+          : null,
+    message: message.message,
+    isRead: Boolean(message.isRead),
+    createdAt: message.createdAt,
+});
 
 // ─── SEND MESSAGE ─────────────────────────────────────────────────────────────
 export const sendMessage = catchAsync(
@@ -20,10 +40,16 @@ export const sendMessage = catchAsync(
         const chatMessage = await ChatMessage.create({
             senderId: req.user._id,
             senderName: `${req.user.firstName} ${req.user.surname}`,
-            senderRole: req.user.role,
+            senderRole: req.user.staffType === "Security" ? "Security" : req.user.role,
             recipientId: recipientId || null,
             message,
         });
+
+        const recipientUserIds = recipientId
+            ? [String(recipientId), String(req.user._id)]
+            : undefined;
+
+        broadcastChatMessage(chatMessage, recipientUserIds);
 
         res.status(201).json({
             status: "success",
@@ -43,7 +69,6 @@ export const getMessages = catchAsync(
             $or: [
                 { senderId: req.user._id },
                 { recipientId: req.user._id },
-                { recipientId: null }, // Group messages
             ],
         };
 
@@ -58,7 +83,7 @@ export const getMessages = catchAsync(
 
         res.status(200).json({
             status: "success",
-            data: messages.reverse(), // Return in chronological order
+            data: messages.reverse().map(normalizeChatMessage), // Return in chronological order
             pagination: {
                 page,
                 limit,
@@ -75,10 +100,7 @@ export const getUnreadCount = catchAsync(
         const count = await ChatMessage.countDocuments({
             isRead: false,
             senderId: { $ne: req.user._id }, // Not sent by current user
-            $or: [
-                { recipientId: req.user._id },
-                { recipientId: null }, // Group messages
-            ],
+            recipientId: req.user._id,
         });
 
         res.status(200).json({
@@ -101,6 +123,7 @@ export const markAsRead = catchAsync(
             {
                 _id: { $in: messageIds },
                 senderId: { $ne: req.user._id }, // Only mark others' messages as read
+                recipientId: req.user._id,
             },
             {
                 isRead: true,
@@ -125,11 +148,26 @@ export const getUsersByRole = catchAsync(
         }
 
         const roleArray = roles.split(",").map(role => role.trim());
+        const wantsSecurity = roleArray.some(
+            role => role.toLowerCase() === "security"
+        );
+        const normalizedRoles = roleArray.filter(
+            role => role.toLowerCase() !== "security"
+        );
+
+        const filters: any[] = [];
+        if (normalizedRoles.length > 0) {
+            filters.push({ role: { $in: normalizedRoles } });
+        }
+        if (wantsSecurity) {
+            filters.push({ role: "Security" });
+            filters.push({ role: "Staff", staffType: "Security" });
+        }
 
         const users = await User.find({
-            role: { $in: roleArray },
             _id: { $ne: req.user._id }, // Exclude current user
-        }).select("firstName surname role email");
+            ...(filters.length > 0 ? { $or: filters } : {}),
+        }).select("firstName surname role staffType email");
 
         res.status(200).json({
             status: "success",

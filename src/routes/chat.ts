@@ -9,17 +9,17 @@ import {
 } from "../controllers/chatController";
 import {
     authenticateToken,
-    authorizeRoles,
+    authorizeAlertAudience,
 } from "../middlewares/auth";
 
 const router = express.Router();
 
 // ── Chat Routes (TUP and Security only) ───────────────────────────────────────
-router.post("/send", authenticateToken, authorizeRoles("TUP", "Security"), sendMessage);
-router.get("/messages", authenticateToken, authorizeRoles("TUP", "Security"), getMessages);
-router.get("/unread-count", authenticateToken, authorizeRoles("TUP", "Security"), getUnreadCount);
-router.patch("/mark-read", authenticateToken, authorizeRoles("TUP", "Security"), markAsRead);
-router.get("/online-users", authenticateToken, authorizeRoles("TUP", "Security"), getOnlineUsers);
-router.get("/users", authenticateToken, authorizeRoles("TUP", "Security"), getUsersByRole);
+router.post("/send", authenticateToken, authorizeAlertAudience, sendMessage);
+router.get("/messages", authenticateToken, authorizeAlertAudience, getMessages);
+router.get("/unread-count", authenticateToken, authorizeAlertAudience, getUnreadCount);
+router.patch("/mark-read", authenticateToken, authorizeAlertAudience, markAsRead);
+router.get("/online-users", authenticateToken, authorizeAlertAudience, getOnlineUsers);
+router.get("/users", authenticateToken, authorizeAlertAudience, getUsersByRole);
 
 export default router;
