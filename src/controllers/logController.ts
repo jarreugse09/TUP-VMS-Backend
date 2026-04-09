@@ -6,6 +6,7 @@ import QRCode from "../models/QRCode";
 import Attendance from "../models/Attendance";
 import { catchAsync } from "../utils/catchAsync";
 import { AppError } from "../utils/AppError";
+import { getScopedUserIds } from "../utils/orgRbac";
 
 interface AuthRequest extends Request {
   user?: any;
@@ -436,8 +437,12 @@ export const recordActivity = async (req: AuthRequest, res: Response) => {
 
 // ─── GET ALL LOGS (Admin) ─────────────────────────────────────────────────────
 export const getLogs = catchAsync(async (req: AuthRequest, res: Response) => {
-  const logs = await Log.find()
-    .populate({ path: "userId", select: "firstName surname role photoURL birthdate", options: { lean: true } })
+  const scopedUserIds = await getScopedUserIds(req.user, {
+    includeSubordinates: true,
+  });
+
+  const logs = await Log.find({ userId: { $in: scopedUserIds } })
+    .populate({ path: "userId", select: "firstName surname role subRole college department photoURL birthdate", options: { lean: true } })
     .sort({ date: -1, timeIn: -1 })
     .lean();
 
@@ -476,7 +481,13 @@ export const getLogs = catchAsync(async (req: AuthRequest, res: Response) => {
     if (entry.user?._id) entry.user = { ...entry.user, qrString: qrMap.get(entry.user._id.toString()) || null };
   }
 
-  const staffIds = Array.from(new Set(result.filter((e: any) => e.user?.role === "Staff").map((e: any) => e.user._id.toString())));
+  const staffIds = Array.from(
+    new Set(
+      result
+        .filter((e: any) => e.user?.role === "Staff" || e.user?.role === "TUP")
+        .map((e: any) => e.user._id.toString()),
+    ),
+  );
   if (staffIds.length) {
     const minDate = new Date(Math.min(...result.map((e: any) => new Date(e.date).getTime()))); minDate.setHours(0,0,0,0);
     const maxDate = new Date(Math.max(...result.map((e: any) => new Date(e.date).getTime()))); maxDate.setHours(23,59,59,999);
@@ -648,8 +659,19 @@ export const exportLogs = catchAsync(
       return next(new AppError("Date range or month required", 400));
     }
 
-    let query: any = { date: { $gte: start, $lte: end }, reason: "attendance" };
-    if (req.user.role !== "TUP") query.userId = req.user.id;
+    const scopedUserIds = await getScopedUserIds(req.user, {
+      workforceOnly: true,
+      includeSubordinates: true,
+    });
+    let query: any = {
+      date: { $gte: start, $lte: end },
+      reason: "attendance",
+      userId: { $in: scopedUserIds },
+    };
+    if (
+      req.user.role !== "TUP" &&
+      !req.user?.subRole
+    ) query.userId = req.user.id;
 
     const logs = await Log.find(query).populate("userId", "firstName surname role").sort({ date: -1 });
 

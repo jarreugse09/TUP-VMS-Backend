@@ -3,6 +3,7 @@ import ChatMessage from "../models/ChatMessage";
 import User from "../models/User";
 import { catchAsync } from "../utils/catchAsync";
 import { AppError } from "../utils/AppError";
+import { buildSecurityAudienceQuery, getEffectiveRole } from "../utils/rbac";
 import { broadcastChatMessage } from "../websocket";
 
 interface AuthRequest extends Request {
@@ -40,7 +41,7 @@ export const sendMessage = catchAsync(
         const chatMessage = await ChatMessage.create({
             senderId: req.user._id,
             senderName: `${req.user.firstName} ${req.user.surname}`,
-            senderRole: req.user.staffType === "Security" ? "Security" : req.user.role,
+            senderRole: getEffectiveRole(req.user),
             recipientId: recipientId || null,
             message,
         });
@@ -160,8 +161,7 @@ export const getUsersByRole = catchAsync(
             filters.push({ role: { $in: normalizedRoles } });
         }
         if (wantsSecurity) {
-            filters.push({ role: "Security" });
-            filters.push({ role: "Staff", staffType: "Security" });
+            filters.push(buildSecurityAudienceQuery());
         }
 
         const users = await User.find({

@@ -1,5 +1,10 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import {
+  isAlertAudience,
+  isTupSuperAdmin,
+  matchesRoleToken,
+} from "../utils/rbac";
 
 interface AuthRequest extends Request {
   user?: any;
@@ -28,27 +33,12 @@ export const authenticateToken = (
 
 export const authorizeRoles = (...roles: string[]) => {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
-    const userRole = String(req.user?.role || "")
-      .trim()
-      .toLowerCase();
-    const allowedRoles = roles.map((role) => role.trim().toLowerCase());
-
-    if (!req.user || !allowedRoles.includes(userRole)) {
+    if (!req.user || !roles.some((role) => matchesRoleToken(req.user, role))) {
       return res.status(403).json({ message: "Insufficient permissions" });
     }
     next();
   };
 };
-
-export const isSecurityAccount = (user: any): boolean => {
-  const userRole = String(user?.role || "").trim().toLowerCase();
-  const userStaffType = String(user?.staffType || "").trim().toLowerCase();
-
-  return userRole === "security" || (userRole === "staff" && userStaffType === "security");
-};
-
-
-
 
 export const authorizeRoleOrStaffType = (
   roles: string[] = [],
@@ -59,23 +49,10 @@ export const authorizeRoleOrStaffType = (
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const userRole = String(req.user?.role || "")
-      .trim()
-      .toLowerCase();
-    const userStaffType = String(req.user?.staffType || "")
-      .trim()
-      .toLowerCase();
-
-    const hasRole =
-      roles.length > 0 &&
-      roles.map((role) => role.trim().toLowerCase()).includes(userRole);
-
-    const hasStaffType =
-      staffTypes.length > 0 &&
-      userStaffType &&
-      staffTypes
-        .map((staffType) => staffType.trim().toLowerCase())
-        .includes(userStaffType);
+    const hasRole = roles.some((role) => matchesRoleToken(req.user, role));
+    const hasStaffType = staffTypes.some((staffType) =>
+      matchesRoleToken(req.user, staffType),
+    );
 
     if (!hasRole && !hasStaffType) {
       return res.status(403).json({ message: "Insufficient permissions" });
@@ -94,8 +71,24 @@ export const authorizeAlertAudience = (
     return res.status(401).json({ message: "Unauthorized" });
   }
 
-  const userRole = String(req.user?.role || "").trim().toLowerCase();
-  if (userRole === "tup" || isSecurityAccount(req.user)) {
+  if (isAlertAudience(req.user)) {
+    next();
+    return;
+  }
+
+  return res.status(403).json({ message: "Insufficient permissions" });
+};
+
+export const authorizeTupSuperAdmin = (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  if (!req.user) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  if (isTupSuperAdmin(req.user)) {
     next();
     return;
   }

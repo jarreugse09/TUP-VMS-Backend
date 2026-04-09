@@ -6,7 +6,16 @@ export interface IUser extends Document {
   surname: string;
   birthdate: Date;
   role: "TUP" | "Staff" | "Student" | "Visitor";
+  subRole?: string;
   staffType?: string;
+  designation?: string;
+  officeUnit?: string;
+  collegeId?: mongoose.Types.ObjectId;
+  college?: string;
+  departmentId?: mongoose.Types.ObjectId;
+  department?: string;
+  supervisorId?: mongoose.Types.ObjectId;
+  workScheduleId?: mongoose.Types.ObjectId;
   photoURL: string;
   email: string;
   passwordHash: string;
@@ -24,7 +33,16 @@ const UserSchema: Schema = new Schema({
     enum: ["TUP", "Staff", "Student", "Visitor"],
     required: true,
   },
+  subRole: { type: String },
   staffType: { type: String },
+  designation: { type: String, trim: true },
+  officeUnit: { type: String, trim: true },
+  collegeId: { type: Schema.Types.ObjectId, ref: "College", default: null },
+  college: { type: String, trim: true },
+  departmentId: { type: Schema.Types.ObjectId, ref: "Department", default: null },
+  department: { type: String, trim: true },
+  supervisorId: { type: Schema.Types.ObjectId, ref: "User", default: null },
+  workScheduleId: { type: Schema.Types.ObjectId, ref: "WorkSchedule", default: null },
   photoURL: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   passwordHash: { type: String, required: true },
@@ -38,6 +56,9 @@ const UserSchema: Schema = new Schema({
 });
 
 // Performance indexes
-UserSchema.index({ role: 1 });
+UserSchema.index({ role: 1, subRole: 1, staffType: 1 });
+UserSchema.index({ college: 1, department: 1 });
+UserSchema.index({ collegeId: 1, departmentId: 1, supervisorId: 1 });
+UserSchema.index({ workScheduleId: 1 });
 
 export default mongoose.model<IUser>("User", UserSchema);

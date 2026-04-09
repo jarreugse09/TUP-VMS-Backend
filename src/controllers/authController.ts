@@ -5,6 +5,7 @@ import User from "../models/User";
 import QRCode from "../models/QRCode";
 import { generateQRString } from "../utils/qrUtils";
 import { validationResult } from "express-validator";
+import { resolveOrganizationRefs, resolveSupervisorId } from "../utils/orgStructure";
 
 // ===== Register =====
 export const register = async (req: Request, res: Response) => {
@@ -30,7 +31,13 @@ export const register = async (req: Request, res: Response) => {
       surname,
       birthdate,
       role,
+      subRole,
       staffType,
+      designation,
+      officeUnit,
+      college,
+      department,
+      supervisorEmail,
       password,
       photoURL,
     } = req.body;
@@ -43,6 +50,8 @@ export const register = async (req: Request, res: Response) => {
 
     // Hash password
     const passwordHash = await bcrypt.hash(password, 10);
+    const orgRefs = await resolveOrganizationRefs({ college, department });
+    const supervisorId = await resolveSupervisorId({ supervisorEmail });
 
     // Create user
     const user = new User({
@@ -50,7 +59,15 @@ export const register = async (req: Request, res: Response) => {
       surname,
       birthdate,
       role,
+      subRole: subRole || undefined,
       staffType: role === "Staff" ? staffType : undefined,
+      designation: designation?.trim() || undefined,
+      officeUnit: officeUnit?.trim() || undefined,
+      college: orgRefs.college,
+      collegeId: orgRefs.collegeId,
+      department: orgRefs.department,
+      departmentId: orgRefs.departmentId,
+      supervisorId,
       email,
       passwordHash,
       photoURL,
@@ -106,7 +123,16 @@ export const login = async (req: Request, res: Response) => {
         id: user._id,
         _id: user._id,
         role: user.role,
+        subRole: user.subRole,
         staffType: user.staffType,
+        designation: user.designation,
+        officeUnit: user.officeUnit,
+        college: user.college,
+        collegeId: user.collegeId,
+        department: user.department,
+        departmentId: user.departmentId,
+        supervisorId: user.supervisorId,
+        workScheduleId: user.workScheduleId,
         firstName: user.firstName,
         surname: user.surname,
         name: `${user.firstName} ${user.surname}`,
@@ -120,9 +146,18 @@ export const login = async (req: Request, res: Response) => {
       user: {
         _id: user._id.toString(),
         role: user.role,
+        subRole: user.subRole,
         firstName: user.firstName,
         surname: user.surname,
         staffType: user.staffType,
+        designation: user.designation,
+        officeUnit: user.officeUnit,
+        college: user.college,
+        collegeId: user.collegeId,
+        department: user.department,
+        departmentId: user.departmentId,
+        supervisorId: user.supervisorId,
+        workScheduleId: user.workScheduleId,
         photoURL: user.photoURL,
         mustCapturePhoto: user.mustCapturePhoto,
       },

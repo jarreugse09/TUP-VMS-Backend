@@ -11,6 +11,8 @@ import userRoutes from "./routes/users";
 import logRoutes from "./routes/logs";
 import alertRoutes from "./routes/alerts";
 import chatRoutes from "./routes/chat";
+import workScheduleRoutes from "./routes/workSchedules";
+import specialScheduleRoutes from "./routes/specialSchedules";
 import { setupWebSocket } from "./websocket";
 
 dotenv.config();
@@ -85,6 +87,8 @@ app.use("/api/attendance", attendanceRoutes);
 app.use("/api/analytics", analyticsRoute);
 app.use("/api/alerts", alertRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/work-schedules", workScheduleRoutes);
+app.use("/api/special-schedules", specialScheduleRoutes);
 
 // === 8️⃣ Setup WebSocket ===
 setupWebSocket(server);

@@ -10,9 +10,9 @@ import {
 } from "../controllers/alertController";
 import {
     authenticateToken,
-    authorizeRoles,
     authenticateApiKey,
     authorizeAlertAudience,
+    authorizeTupSuperAdmin,
 } from "../middlewares/auth";
 
 const router = express.Router();
@@ -26,6 +26,6 @@ router.get("/unread-count", authenticateToken, authorizeAlertAudience, getUnread
 router.patch("/:id/read", authenticateToken, authorizeAlertAudience, markAsRead);
 router.patch("/read-all", authenticateToken, authorizeAlertAudience, markAllAsRead);
 router.patch("/:id/status", authenticateToken, authorizeAlertAudience, updateIncidentStatus);
-router.delete("/:id", authenticateToken, authorizeRoles("TUP"), deleteAlert);
+router.delete("/:id", authenticateToken, authorizeTupSuperAdmin, deleteAlert);
 
 export default router;

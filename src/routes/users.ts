@@ -45,7 +45,19 @@ const profileStorage = multer.diskStorage({
 });
 const profileUpload = multer({ storage: profileStorage });
 
-router.get("/admin/", authenticateToken, authorizeRoles("TUP"), getAllUsers);
+router.get(
+  "/admin/",
+  authenticateToken,
+  authorizeRoles(
+    "TUP",
+    "dean",
+    "department_head",
+    "hr_head",
+    "hr_staff",
+    "security_head",
+  ),
+  getAllUsers,
+);
 router.post(
   "/admin/register",
   authenticateToken,
@@ -54,11 +66,35 @@ router.post(
     body("firstName").notEmpty(),
     body("surname").notEmpty(),
     body("birthdate").isISO8601(),
-    body("role").isIn(["Staff", "Student"]),
+    body("role").isIn(["TUP", "Staff", "Student", "Visitor"]),
     body("staffType")
       .if(body("role").equals("Staff"))
       .notEmpty()
       .withMessage("Staff type is required for Staff role"),
+    body("subRole")
+      .optional()
+      .isString()
+      .withMessage("Sub-role must be a string"),
+    body("designation")
+      .optional()
+      .isString()
+      .withMessage("Designation must be a string"),
+    body("officeUnit")
+      .optional()
+      .isString()
+      .withMessage("Office/unit must be a string"),
+    body("college")
+      .optional()
+      .isString()
+      .withMessage("College must be a string"),
+    body("department")
+      .optional()
+      .isString()
+      .withMessage("Department must be a string"),
+    body("supervisorEmail")
+      .optional()
+      .isEmail()
+      .withMessage("Supervisor email must be valid"),
     body("email").isEmail(),
     body("password").isLength({ min: 6 }),
     body("customQR")

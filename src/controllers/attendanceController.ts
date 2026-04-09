@@ -2,6 +2,7 @@ import Attendance from "../models/Attendance";
 import { catchAsync } from "../utils/catchAsync";
 import { AppError } from "../utils/AppError";
 import { NextFunction, Request, Response } from "express";
+import { getScopedUserIds } from "../utils/orgRbac";
 
 interface AuthRequest extends Request {
   user?: any;
@@ -10,8 +11,12 @@ interface AuthRequest extends Request {
 export const getAttendance = catchAsync(
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     const { startDate, endDate, page = "1", limit = "200" } = req.query as any;
+    const scopedUserIds = await getScopedUserIds(req.user, {
+      workforceOnly: true,
+      includeSubordinates: true,
+    });
 
-    let query: any = {};
+    let query: any = { staffId: { $in: scopedUserIds } };
     if (startDate && endDate) {
       const start = new Date(startDate as string);
       const end = new Date(endDate as string);
@@ -30,7 +35,7 @@ export const getAttendance = catchAsync(
     const attendance = await Attendance.find(query)
       .populate({
         path: "staffId",
-        select: "firstName surname role photoURL",
+        select: "firstName surname role subRole college department photoURL",
         options: { lean: true },
       })
       .populate({
@@ -84,8 +89,12 @@ export const exportAttendance = catchAsync(
     }
 
     // Only TUP can export all; others only their own
-    const query: any = { date: { $gte: start, $lte: end } };
-    if (req.user.role !== "TUP") {
+    const scopedUserIds = await getScopedUserIds(req.user, {
+      workforceOnly: true,
+      includeSubordinates: true,
+    });
+    const query: any = { date: { $gte: start, $lte: end }, staffId: { $in: scopedUserIds } };
+    if (req.user.role !== "TUP" && !req.user?.subRole) {
       query.staffId = req.user.id;
     }
 

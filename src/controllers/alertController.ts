@@ -5,6 +5,10 @@ import User from "../models/User";
 import { catchAsync } from "../utils/catchAsync";
 import { AppError } from "../utils/AppError";
 import {
+    buildAlertAudienceQuery,
+    buildSecurityAudienceQuery,
+} from "../utils/rbac";
+import {
     broadcastAlert,
     broadcastAlertRead,
     broadcastAllAlertsRead,
@@ -53,19 +57,13 @@ function normalizeAlertForUser(alert: any, userId: string) {
 }
 
 async function getAlertAudienceUsers() {
-    return User.find({
-        $or: [
-            { role: "TUP" },
-            { role: "Staff", staffType: "Security" },
-        ],
-    }).select("_id role staffType firstName surname");
+    return User.find(buildAlertAudienceQuery()).select(
+        "_id role subRole staffType firstName surname",
+    );
 }
 
 async function getSecurityUsers() {
-    return User.find({
-        role: "Staff",
-        staffType: "Security",
-    }).select("_id firstName surname");
+    return User.find(buildSecurityAudienceQuery()).select("_id firstName surname");
 }
 
 function buildSystemChatMessage(alert: any): string {

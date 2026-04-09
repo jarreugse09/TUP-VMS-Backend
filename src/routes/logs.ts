@@ -28,8 +28,21 @@ router.post("/staff/scan", authenticateToken, authorizeRoles("Staff"), scanTrans
 router.post("/user/scan", authenticateToken, authorizeRoles("Visitor", "Student", "Staff"), visitorScanQR);
 router.post("/activity", authenticateToken, recordActivity);
 
-// ── Admin ────────────────────────────────────────────────────────────────────
-router.get("/logs", authenticateToken, authorizeRoles("TUP"), getLogs);
+// ── Scoped org-aware log access ───────────────────────────────────────────────
+router.get(
+  "/logs",
+  authenticateToken,
+  authorizeRoles(
+    "TUP",
+    "dean",
+    "department_head",
+    "hr_head",
+    "hr_staff",
+    "security_head",
+    "security_staff",
+  ),
+  getLogs,
+);
 
 // ── /me routes — MUST come before /logs/staff/ to avoid Express conflicts ────
 // Attendance only (check-in/check-out) — no transactions
@@ -46,6 +59,22 @@ router.get("/logs/attendance", authenticateToken, getUserAttendance);
 router.get("/activities", authenticateToken, getActivities);
 
 // ── Export ───────────────────────────────────────────────────────────────────
-router.post("/export", authenticateToken, exportLogs);
+router.post(
+  "/export",
+  authenticateToken,
+  authorizeRoles(
+    "TUP",
+    "dean",
+    "department_head",
+    "hr_head",
+    "hr_staff",
+    "security_head",
+    "security_staff",
+    "Staff",
+    "Student",
+    "Visitor",
+  ),
+  exportLogs,
+);
 
 export default router;

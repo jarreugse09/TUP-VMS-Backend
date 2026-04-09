@@ -7,6 +7,8 @@ import { generateQRString } from "../utils/qrUtils";
 import { catchAsync } from "../utils/catchAsync";
 import { AppError } from "../utils/AppError";
 import { validationResult } from "express-validator";
+import { resolveOrganizationRefs, resolveSupervisorId } from "../utils/orgStructure";
+import { getScopedUserQuery } from "../utils/orgRbac";
 interface AuthRequest extends Request {
   user?: any;
   file?: any;
@@ -231,27 +233,42 @@ export const rejectQRRequest = async (req: AuthRequest, res: Response) => {
 
 export const getAllUsers = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { role, name, startDate, endDate } = req.query;
+    const authReq = req as AuthRequest;
+    const { role, name, startDate, endDate, college, department } = req.query;
 
-    // Build query
-    const query: any = {};
+    const queryParts: any[] = [];
+    queryParts.push(await getScopedUserQuery(authReq.user, {
+      includeSubordinates: true,
+    }));
 
-    if (role) query.role = role;
+    if (role) queryParts.push({ role });
+    if (college) queryParts.push({ college });
+    if (department) queryParts.push({ department });
     if (name) {
-      query.$or = [
+      queryParts.push({
+        $or: [
         { firstName: { $regex: new RegExp(name as string, "i") } },
         { surname: { $regex: new RegExp(name as string, "i") } },
-      ];
+        ],
+      });
     }
     if (startDate || endDate) {
-      query.createdAt = {};
-      if (startDate) query.createdAt.$gte = new Date(startDate as string);
-      if (endDate) query.createdAt.$lte = new Date(endDate as string);
+      const createdAt: any = {};
+      if (startDate) createdAt.$gte = new Date(startDate as string);
+      if (endDate) createdAt.$lte = new Date(endDate as string);
+      queryParts.push({ createdAt });
     }
+    const query: any =
+      queryParts.length === 1 ? queryParts[0] : { $and: queryParts };
 
     const users = await User.find(query)
+      .populate({
+        path: "supervisorId",
+        select: "firstName surname email role subRole",
+        options: { lean: true },
+      })
       .select(
-        "_id firstName surname birthdate role staffType status photoURL email createdAt",
+        "_id firstName surname birthdate role subRole staffType designation officeUnit college collegeId department departmentId supervisorId workScheduleId status photoURL email createdAt",
       )
       .lean();
 
@@ -288,7 +305,13 @@ export const adminRegisterUser = async (req: AuthRequest, res: Response) => {
       surname,
       birthdate,
       role,
+      subRole,
       staffType,
+      designation,
+      officeUnit,
+      college,
+      department,
+      supervisorEmail,
       password,
       customQR,
       photoURL,
@@ -314,13 +337,23 @@ export const adminRegisterUser = async (req: AuthRequest, res: Response) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
+    const orgRefs = await resolveOrganizationRefs({ college, department });
+    const supervisorId = await resolveSupervisorId({ supervisorEmail });
 
     const user = new User({
       firstName,
       surname,
       birthdate,
       role,
+      subRole: subRole || undefined,
       staffType: role === "Staff" ? staffType : undefined,
+      designation: designation?.trim() || undefined,
+      officeUnit: officeUnit?.trim() || undefined,
+      college: orgRefs.college,
+      collegeId: orgRefs.collegeId,
+      department: orgRefs.department,
+      departmentId: orgRefs.departmentId,
+      supervisorId,
       email,
       passwordHash,
       photoURL: photoURL || "https://placehold.co/200x200?text=TUP+VMS",
@@ -379,9 +412,16 @@ export const completeFirstPhotoCapture = catchAsync(
       user: {
         _id: user._id.toString(),
         role: user.role,
+        subRole: user.subRole,
         firstName: user.firstName,
         surname: user.surname,
         staffType: user.staffType,
+        designation: user.designation,
+        officeUnit: user.officeUnit,
+        college: user.college,
+        department: user.department,
+        supervisorId: user.supervisorId,
+        workScheduleId: user.workScheduleId,
         photoURL: user.photoURL,
         mustCapturePhoto: user.mustCapturePhoto,
       },
