@@ -440,6 +440,208 @@ export const getLogs = catchAsync(async (req: AuthRequest, res: Response) => {
   const limit = Math.min(Math.max(Number(req.query.limit) || 0, 0), 200);
   const shouldPaginate = limit > 0;
 
+  if (shouldPaginate) {
+    const groupedStages: any[] = [
+      {
+        $addFields: {
+          dateKey: {
+            $dateToString: {
+              format: "%Y-%m-%d",
+              date: "$date",
+            },
+          },
+          logTimestamp: {
+            $ifNull: ["$timeOut", { $ifNull: ["$timeIn", "$date"] }],
+          },
+        },
+      },
+      { $sort: { logTimestamp: -1, date: -1, timeIn: -1 } },
+      {
+        $group: {
+          _id: {
+            userId: "$userId",
+            dateKey: "$dateKey",
+          },
+          userId: { $first: "$userId" },
+          date: { $first: "$date" },
+          dailyStatus: { $first: "$status" },
+          attendanceCandidates: {
+            $push: {
+              $cond: [
+                { $eq: ["$reason", "attendance"] },
+                {
+                  timeIn: "$timeIn",
+                  timeOut: "$timeOut",
+                  status: "$status",
+                },
+                null,
+              ],
+            },
+          },
+          activityCandidates: {
+            $push: {
+              $cond: [
+                {
+                  $and: [
+                    { $ne: ["$reason", "attendance"] },
+                    { $ne: ["$reason", null] },
+                  ],
+                },
+                {
+                  reason: "$reason",
+                  timeIn: "$timeIn",
+                  timeOut: "$timeOut",
+                  status: "$status",
+                },
+                null,
+              ],
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          _id: {
+            $concat: [{ $toString: "$userId" }, "-", "$_id.dateKey"],
+          },
+          userId: 1,
+          date: 1,
+          dailyStatus: 1,
+          attendance: {
+            $arrayElemAt: [
+              {
+                $filter: {
+                  input: "$attendanceCandidates",
+                  as: "attendance",
+                  cond: { $ne: ["$$attendance", null] },
+                },
+              },
+              0,
+            ],
+          },
+          activities: {
+            $filter: {
+              input: "$activityCandidates",
+              as: "activity",
+              cond: { $ne: ["$$activity", null] },
+            },
+          },
+        },
+      },
+      { $sort: { date: -1 } },
+    ];
+
+    const countResult = await Log.aggregate([
+      ...groupedStages,
+      { $count: "total" },
+    ]);
+    const total = countResult[0]?.total ?? 0;
+
+    const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
+    const safePage = Math.min(page, totalPages);
+    const startIndex = (safePage - 1) * limit;
+
+    const pageData = await Log.aggregate([
+      ...groupedStages,
+      { $skip: startIndex },
+      { $limit: limit },
+    ]);
+
+    const userIds = Array.from(
+      new Set(
+        pageData
+          .filter((entry: any) => entry.userId)
+          .map((entry: any) => entry.userId.toString()),
+      ),
+    );
+
+    const users = userIds.length
+      ? await User.find({ _id: { $in: userIds } })
+          .select("firstName surname role photoURL birthdate")
+          .lean()
+      : [];
+    const userMap = new Map(users.map((user: any) => [user._id.toString(), user]));
+
+    const result = pageData.map((entry: any) => ({
+      _id: entry._id,
+      date: entry.date,
+      dailyStatus: entry.dailyStatus,
+      attendance: entry.attendance ?? null,
+      activities: entry.activities ?? [],
+      user: userMap.get(entry.userId.toString()) || null,
+    }));
+
+    const qrCodes = userIds.length
+      ? await QRCode.find({ userId: { $in: userIds } }).select("userId qrString").lean()
+      : [];
+    const qrMap = new Map(qrCodes.map((qr: any) => [qr.userId.toString(), qr.qrString]));
+
+    for (const entry of result) {
+      if (entry.user?._id) {
+        entry.user = {
+          ...entry.user,
+          qrString: qrMap.get(entry.user._id.toString()) || null,
+        };
+      }
+    }
+
+    const staffIds = Array.from(
+      new Set(
+        result
+          .filter((entry: any) => entry.user?.role === "Staff")
+          .map((entry: any) => entry.user._id.toString()),
+      ),
+    );
+
+    if (staffIds.length && result.length) {
+      const minDate = new Date(
+        Math.min(...result.map((entry: any) => new Date(entry.date).getTime())),
+      );
+      minDate.setHours(0, 0, 0, 0);
+      const maxDate = new Date(
+        Math.max(...result.map((entry: any) => new Date(entry.date).getTime())),
+      );
+      maxDate.setHours(23, 59, 59, 999);
+
+      const attends = await Attendance.find({
+        staffId: { $in: staffIds },
+        date: { $gte: minDate, $lte: maxDate },
+      }).lean();
+      const attMap = new Map<string, any>();
+      for (const attendance of attends) {
+        attMap.set(
+          `${(attendance.staffId as any).toString()}-${new Date(attendance.date).toISOString().split("T")[0]}`,
+          attendance,
+        );
+      }
+
+      for (const entry of result) {
+        if (!entry.attendance && entry.user?.role === "Staff") {
+          const key = `${entry.user._id.toString()}-${new Date(entry.date).toISOString().split("T")[0]}`;
+          const attendance = attMap.get(key);
+          if (attendance) {
+            entry.attendance = {
+              timeIn: attendance.timeIn,
+              timeOut: attendance.timeOut,
+              status: attendance.timeOut ? "Checked Out" : "In TUP",
+            };
+          }
+        }
+      }
+    }
+
+    return res.json({
+      data: result,
+      meta: {
+        page: safePage,
+        limit,
+        total,
+        totalPages,
+        hasMore: safePage < totalPages,
+      },
+    });
+  }
+
   const logs = await Log.find()
     .populate({ path: "userId", select: "firstName surname role photoURL birthdate", options: { lean: true } })
     .sort({ date: -1, timeIn: -1 })
@@ -495,26 +697,7 @@ export const getLogs = catchAsync(async (req: AuthRequest, res: Response) => {
     }
   }
 
-  if (!shouldPaginate) {
-    return res.json(result);
-  }
-
-  const total = result.length;
-  const totalPages = Math.max(Math.ceil(total / limit), 1);
-  const safePage = Math.min(page, totalPages);
-  const startIndex = (safePage - 1) * limit;
-  const pagedData = result.slice(startIndex, startIndex + limit);
-
-  return res.json({
-    data: pagedData,
-    meta: {
-      page: safePage,
-      limit,
-      total,
-      totalPages,
-      hasMore: safePage < totalPages,
-    },
-  });
+  return res.json(result);
 });
 
 // ─── GET STAFF LOGS ───────────────────────────────────────────────────────────
