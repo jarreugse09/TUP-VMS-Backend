@@ -436,6 +436,10 @@ export const recordActivity = async (req: AuthRequest, res: Response) => {
 
 // ─── GET ALL LOGS (Admin) ─────────────────────────────────────────────────────
 export const getLogs = catchAsync(async (req: AuthRequest, res: Response) => {
+  const page = Math.max(Number(req.query.page) || 1, 1);
+  const limit = Math.min(Math.max(Number(req.query.limit) || 0, 0), 200);
+  const shouldPaginate = limit > 0;
+
   const logs = await Log.find()
     .populate({ path: "userId", select: "firstName surname role photoURL birthdate", options: { lean: true } })
     .sort({ date: -1, timeIn: -1 })
@@ -491,7 +495,26 @@ export const getLogs = catchAsync(async (req: AuthRequest, res: Response) => {
     }
   }
 
-  res.json(result);
+  if (!shouldPaginate) {
+    return res.json(result);
+  }
+
+  const total = result.length;
+  const totalPages = Math.max(Math.ceil(total / limit), 1);
+  const safePage = Math.min(page, totalPages);
+  const startIndex = (safePage - 1) * limit;
+  const pagedData = result.slice(startIndex, startIndex + limit);
+
+  return res.json({
+    data: pagedData,
+    meta: {
+      page: safePage,
+      limit,
+      total,
+      totalPages,
+      hasMore: safePage < totalPages,
+    },
+  });
 });
 
 // ─── GET STAFF LOGS ───────────────────────────────────────────────────────────
