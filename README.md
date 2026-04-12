@@ -10,17 +10,21 @@ Express + TypeScript backend for the TUP Visitation Management System (VMS). Thi
 - MongoDB + Mongoose
 - JWT authentication
 - WebSocket via `ws`
+- node-cron (scheduled jobs)
 
 ## Core Features
 
 - Authentication and JWT login
 - User profile and admin user management
 - Attendance and visit log APIs
+- QR scanning endpoint for time-in/out, breaks, go-out, transactions
 - Analytics endpoints
 - QR/profile photo request workflow
 - Real-time alert notification system
 - Real-time chat system
 - CCTV webhook endpoint for Hawkeye alert ingestion
+- Role-Based Access Control (RBAC) with subRole hierarchy
+- Automatic daily attendance computation (Late/Absent/WFH/Exemption)
 
 ## Project Structure
 
@@ -94,15 +98,82 @@ Default local base URL:
 http://localhost:5000/api
 ```
 
-Main route groups:
+### Route Groups (Updated)
 
-- `/api/auth`
-- `/api/users`
-- `/api/logs`
-- `/api/attendance`
-- `/api/analytics`
-- `/api/alerts`
-- `/api/chat`
+- `/api/auth` - Authentication (login, register)
+- `/api/users` - User management
+- `/api/logs` - Visit/activity logs
+- `/api/attendance` - Attendance logs (scoped by role)
+- `/api/analytics` - Analytics endpoints
+- `/api/alerts` - Alert management
+- `/api/chat` - Chat system
+- `/api/scan` - QR scanning (time-in/out, breaks, go-out, transactions)
+- `/api/colleges` - College CRUD (HR only)
+- `/api/departments` - Department CRUD (HR, Dean, DeptHead)
+- `/api/transaction-logs` - Transaction logs (client/staff view)
+- `/api/work-schedules` - Work schedule management
+- `/api/special-schedules` - WFH, holiday, exemption management
+
+## RBAC Implementation
+
+### Role Hierarchy
+
+| Role | subRole |
+|------|---------|
+| TUP | top_management, dean, department_head, faculty, non_academic, maintenance |
+| Staff | hr_head, hr_staff, security_head, security_staff |
+| Student | (none) |
+| Visitor | (none) |
+
+### New Middleware
+
+- `requireRoleOrSubRole(roles, subRoles)` - Checks role OR subRole
+- `requireScopeAccess(scopeType)` - Data isolation for dean/department_head
+
+### Attendance Scoping
+
+- `GET /api/attendance/logs` - Role-scoped (own/dept/college)
+- `GET /api/attendance/all` - HR/Security only
+- `GET /api/attendance/dept/:id` - DepartmentHead only
+- `GET /api/attendance/college/:id` - Dean only
+
+### Archive & Recovery (Superadmin Only)
+
+- `GET /api/admin/archive` - Retrieve soft-deleted/rejected records (Users, QR, Photos)
+- `PATCH /api/admin/archive/restore/:type/:id` - Restore a record with a mandatory reason
+
+### Attendance Computation
+
+- Cron job runs daily at 6PM to compute Late/Absent status
+- Manual trigger: `POST /api/attendance/compute` (hr_head only)
+
+## Security Architecture (DPA 2012)
+
+### Silo Isolation
+The system employs `getSiloedUserFilter` middleware to enforce academic and organizational silos. 
+- **Deans/Dept Heads** are restricted to users within their assigned `collegeId` or `departmentId`.
+- **HR/Security Head** have university-wide visibility for their respective domains (Workforce vs Security).
+- **Fail-Closed**: If a user's scope cannot be determined, the API defaults to returning zero results rather than all results.
+
+### Forensic Auditing
+Every administrative action (restoration, status change, schedule override) is logged in the `ActionLog` collection with:
+- PerformedBy (User ID)
+- IP Address & User Agent
+- Exact detail of the mutation
+- Severity level (Info/Warning/Critical)
+
+
+## User Model Updates
+
+New fields added:
+- `qrCode` - Unique UUID v4 per user (static QR)
+- `platesNumber` - Vehicle plate number
+- `isWFH` - Work from home flag
+- `subRole` - Specific position within role
+- `collegeId` / `college` - Associated college
+- `departmentId` / `department` - Associated department
+- `supervisorId` - Direct supervisor reference
+- `workScheduleId` - Assigned work schedule
 
 ## Real-Time Features
 

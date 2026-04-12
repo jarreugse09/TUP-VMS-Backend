@@ -1,7 +1,9 @@
 import { Request, Response } from "express";
+import mongoose from "mongoose";
 import Attendance from "../models/Attendance";
-import Log from "../models/Log";
 import User from "../models/User";
+import TransactionLog from "../models/TransactionLog";
+import VisitLog from "../models/VisitLog";
 import {
   getScopedUserIds,
   getScopedUserQuery,
@@ -138,30 +140,31 @@ const buildManagedAttendanceAnalytics = async (
 ) => {
   const subRole = getNormalizedSubRole(req.user);
   const viewerId = String(req.user?._id || req.user?.id || "");
+  
+  // The global silo filter in orgRbac already restricts scopedWorkforceUsers 
+  // to ONLY allowed roles (department_head, faculty, etc.) for deans/heads.
   const managedUsers = scopedWorkforceUsers.filter((user) => String(user._id) !== viewerId);
 
   if (subRole === "dean") {
-    const collegeMembers = managedUsers.filter((user) =>
-      ["faculty", "department_head"].includes(String(user.subRole || "").toLowerCase()),
-    );
-
+    // Dean Scope: ALL members within the collegeId
+    // Already pre-filtered by orgRbac to excludes Visitors/Students
     const departments = Array.from(
       new Set(
-        collegeMembers
+        managedUsers
           .map((user) => String(user.department || "").trim())
           .filter(Boolean),
       ),
     ).sort();
 
     return {
-      label: "College Attendance KPI",
+      label: "College Workforce Performance",
       summary: summarizeAttendance(
-        collegeMembers.map((user) => String(user._id)),
+        managedUsers.map((user) => String(user._id)),
         attendance,
         dayCount,
       ),
       groups: departments.map((department) => {
-        const departmentUsers = collegeMembers.filter(
+        const departmentUsers = managedUsers.filter(
           (user) => String(user.department || "").trim() === department,
         );
 
@@ -179,23 +182,20 @@ const buildManagedAttendanceAnalytics = async (
   }
 
   if (subRole === "department_head") {
-    const facultyUsers = managedUsers.filter(
-      (user) => String(user.subRole || "").toLowerCase() === "faculty",
-    );
-
+    // Dept Head Scope: ALL members within the departmentId
     return {
-      label: "Department Attendance KPI",
+      label: "Department Performance Metrics",
       summary: summarizeAttendance(
-        facultyUsers.map((user) => String(user._id)),
+        managedUsers.map((user) => String(user._id)),
         attendance,
         dayCount,
       ),
       groups: [
         {
-          key: "faculty",
-          label: String(req.user?.department || "Faculty"),
+          key: "department",
+          label: String(req.user?.department || "Department Workforce"),
           summary: summarizeAttendance(
-            facultyUsers.map((user) => String(user._id)),
+            managedUsers.map((user) => String(user._id)),
             attendance,
             dayCount,
           ),
@@ -208,14 +208,14 @@ const buildManagedAttendanceAnalytics = async (
     const workforceGroups = [
       {
         key: "faculty",
-        label: "Faculty",
+        label: "Faculty Workforce",
         users: scopedWorkforceUsers.filter((user) =>
           FACULTY_SUB_ROLES.includes(String(user.subRole || "").toLowerCase()),
         ),
       },
       {
         key: "academic",
-        label: "Academic",
+        label: "Academic Leadership",
         users: scopedWorkforceUsers.filter((user) =>
           ACADEMIC_LEADERSHIP_SUB_ROLES.includes(
             String(user.subRole || "").toLowerCase(),
@@ -223,8 +223,8 @@ const buildManagedAttendanceAnalytics = async (
         ),
       },
       {
-        key: "non_academic",
-        label: "Non-Academic",
+        key: "staff",
+        label: "Administrative Staff",
         users: scopedWorkforceUsers.filter((user) =>
           NON_ACADEMIC_SUB_ROLES.includes(String(user.subRole || "").toLowerCase()) ||
           String(user.role || "") === "Staff",
@@ -233,7 +233,7 @@ const buildManagedAttendanceAnalytics = async (
     ];
 
     return {
-      label: "Workforce Attendance KPI",
+      label: "University Workforce KPI",
       summary: summarizeAttendance(
         scopedWorkforceUsers.map((user) => String(user._id)),
         attendance,
@@ -256,6 +256,7 @@ const buildManagedAttendanceAnalytics = async (
 
 export const getHourlyAnalytics = async (req: AuthRequest, res: Response) => {
   try {
+    const subRole = getNormalizedSubRole(req.user);
     const { date } = req.query as { date?: string };
 
     if (!date) {
@@ -285,14 +286,20 @@ export const getHourlyAnalytics = async (req: AuthRequest, res: Response) => {
 
       let logs: any[];
       if (role === "Staff" || role === "TUP") {
+        const matchStage: any = {
+          staffId: { $in: ids },
+          date: { $gte: start, $lte: end },
+          timeIn: { $ne: null },
+        };
+        const subRole = getNormalizedSubRole(req.user);
+        if (subRole === 'dean' && req.user.collegeId) {
+          matchStage.collegeId = new mongoose.Types.ObjectId(req.user.collegeId);
+        } else if (subRole === 'department_head' && req.user.departmentId) {
+          matchStage.departmentId = new mongoose.Types.ObjectId(req.user.departmentId);
+        }
+
         logs = await Attendance.aggregate([
-          {
-            $match: {
-              staffId: { $in: ids },
-              date: { $gte: start, $lte: end },
-              timeIn: { $ne: null },
-            },
-          },
+          { $match: matchStage },
           {
             $project: {
               hour: { $hour: "$timeIn" },
@@ -306,14 +313,20 @@ export const getHourlyAnalytics = async (req: AuthRequest, res: Response) => {
           },
         ]);
       } else {
-        logs = await Log.aggregate([
-          {
-            $match: {
-              userId: { $in: ids },
-              date: { $gte: start, $lte: end },
-              timeIn: { $ne: null },
-            },
-          },
+        const matchStage: any = {
+          userId: { $in: ids },
+          date: { $gte: start, $lte: end },
+          timeIn: { $ne: null },
+        };
+        const subRole = getNormalizedSubRole(req.user);
+        if (subRole === 'dean' && req.user.collegeId) {
+          matchStage.collegeId = new mongoose.Types.ObjectId(req.user.collegeId);
+        } else if (subRole === 'department_head' && req.user.departmentId) {
+          matchStage.departmentId = new mongoose.Types.ObjectId(req.user.departmentId);
+        }
+
+        logs = await VisitLog.aggregate([
+          { $match: matchStage },
           {
             $project: {
               hour: { $hour: "$timeIn" },
@@ -345,6 +358,7 @@ export const getHourlyAnalytics = async (req: AuthRequest, res: Response) => {
 
 export const getAnalyticsOverview = async (req: AuthRequest, res: Response) => {
   try {
+    const subRole = getNormalizedSubRole(req.user);
     const { start, end } = getDateRangeBounds(req);
     const dayCount = getInclusiveDayCount(start, end);
     const scopedUserIds = await getScopedUserIds(req.user, {
@@ -361,10 +375,18 @@ export const getAnalyticsOverview = async (req: AuthRequest, res: Response) => {
       .lean();
 
     const workforceUserIds = scopedWorkforceUsers.map((user: any) => user._id);
-    const attendanceDocs = (await Attendance.find({
+    const attendanceQuery: any = {
       staffId: { $in: workforceUserIds },
       date: { $gte: start, $lte: end },
-    })
+      deletedAt: null,
+    };
+    if (subRole === 'dean' && req.user.collegeId) {
+      attendanceQuery.collegeId = new mongoose.Types.ObjectId(req.user.collegeId);
+    } else if (subRole === 'department_head' && req.user.departmentId) {
+      attendanceQuery.departmentId = new mongoose.Types.ObjectId(req.user.departmentId);
+    }
+
+    const attendanceDocs = (await Attendance.find(attendanceQuery)
       .select("staffId date timeIn timeOut totalHours")
       .lean()) as unknown as AttendanceDoc[];
 
@@ -373,13 +395,18 @@ export const getAnalyticsOverview = async (req: AuthRequest, res: Response) => {
       _id: { $in: scopedUserIds },
     }).distinct("_id");
 
-    const dailyVisitors = await Log.aggregate([
-      {
-        $match: {
-          userId: { $in: visitorIds },
-          date: { $gte: start, $lte: end },
-        },
-      },
+    const visitorsMatch: any = {
+      userId: { $in: visitorIds },
+      date: { $gte: start, $lte: end },
+    };
+    // Visitors might not have collegeId/departmentId, so we scope by their host's or just by visitorIds
+    // which are already scoped by getScopedUserIds. However, for database-level hardening:
+    if (subRole === 'dean' && req.user.collegeId) {
+      visitorsMatch.collegeId = new mongoose.Types.ObjectId(req.user.collegeId);
+    }
+
+    const dailyVisitors = await VisitLog.aggregate([
+      { $match: visitorsMatch },
       {
         $group: {
           _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
@@ -394,6 +421,7 @@ export const getAnalyticsOverview = async (req: AuthRequest, res: Response) => {
         $match: {
           staffId: { $in: workforceUserIds },
           date: { $gte: start, $lte: end },
+          deletedAt: null,
         },
       },
       {
@@ -457,27 +485,30 @@ export const getAnalyticsOverview = async (req: AuthRequest, res: Response) => {
         };
       } else {
         const ids = role === "Student" ? studentIds : visitorIds;
-        const usersCurrentlyInside = await Log.countDocuments({
-          userId: { $in: ids },
+        const usersCurrentlyInside = await VisitLog.countDocuments({
+          visitorId: { $in: ids },
           date: { $gte: start, $lte: end },
           timeIn: { $ne: null },
           timeOut: null,
         });
 
-        const usersCheckedOut = await Log.countDocuments({
-          userId: { $in: ids },
+        const usersCheckedOut = await VisitLog.countDocuments({
+          visitorId: { $in: ids },
           date: { $gte: start, $lte: end },
           timeOut: { $ne: null },
         });
 
-        const daily = await Log.aggregate([
-          {
-            $match: {
-              userId: { $in: ids },
-              date: { $gte: start, $lte: end },
-              timeIn: { $ne: null },
-            },
-          },
+        const studentMatch: any = {
+          visitorId: { $in: ids },
+          date: { $gte: start, $lte: end },
+          timeIn: { $ne: null },
+        };
+        if (subRole === 'dean' && req.user.collegeId) {
+          studentMatch.collegeId = new mongoose.Types.ObjectId(req.user.collegeId);
+        }
+
+        const daily = await VisitLog.aggregate([
+          { $match: studentMatch },
           {
             $group: {
               _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
@@ -511,15 +542,109 @@ export const getAnalyticsOverview = async (req: AuthRequest, res: Response) => {
     });
 
     const viewerId = String(req.user?._id || req.user?.id || "");
-    const subRole = getNormalizedSubRole(req.user);
     const effectiveRole = getEffectiveRole(req.user);
     const selfAttendance = summarizeAttendance([viewerId], attendanceDocs, dayCount);
+    const totalSelfLate = attendanceDocs.filter((a: any) => String(a.staffId) === viewerId && a.status === "late").length;
+    const selfPunctualityScore = selfAttendance.attendanceRecords > 0 
+        ? Math.round(((selfAttendance.attendanceRecords - totalSelfLate) / selfAttendance.attendanceRecords) * 100) 
+        : 100;
+
+    const serviceTimesMatch: any = {
+      staffId: viewerId,
+      transactionStart: { $gte: start, $lte: end },
+      transactionEnd: { $ne: null }
+    };
+    if (subRole === 'dean' && req.user.collegeId) {
+      serviceTimesMatch.collegeId = new mongoose.Types.ObjectId(req.user.collegeId);
+    } else if (subRole === 'department_head' && req.user.departmentId) {
+      serviceTimesMatch.departmentId = new mongoose.Types.ObjectId(req.user.departmentId);
+    }
+
+    const serviceTimes = await TransactionLog.aggregate([
+      { $match: serviceTimesMatch },
+      {
+        $project: {
+          durationMs: { $subtract: ["$transactionEnd", "$transactionStart"] }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          avgDurationMs: { $avg: "$durationMs" }
+        }
+      }
+    ]);
+    const avgServiceTimeMinutes = serviceTimes.length > 0 ? Math.round(serviceTimes[0].avgDurationMs / 60000) : 0;
+
     const managedAttendance = await buildManagedAttendanceAnalytics(
       req,
       scopedWorkforceUsers,
       attendanceDocs,
       dayCount,
     );
+
+    const logHeatmapMatch: any = {
+      visitorId: { $in: scopedUserIds },
+      date: { $gte: start, $lte: end },
+      timeIn: { $ne: null }
+    };
+    if (subRole === 'dean' && req.user.collegeId) {
+      logHeatmapMatch.collegeId = new mongoose.Types.ObjectId(req.user.collegeId);
+    }
+
+    const logHeatmap = await VisitLog.aggregate([
+      { $match: logHeatmapMatch },
+      {
+        $project: {
+          day: { $dayOfWeek: { date: "$timeIn", timezone: "Asia/Manila" } },
+          hour: { $hour: { date: "$timeIn", timezone: "Asia/Manila" } }
+        }
+      },
+      {
+        $group: {
+          _id: { day: "$day", hour: "$hour" },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const attendanceHeatmapMatch: any = {
+      staffId: { $in: scopedWorkforceUsers.map(u => u._id) },
+      date: { $gte: start, $lte: end },
+      timeIn: { $ne: null }
+    };
+    if (subRole === 'dean' && req.user.collegeId) {
+      attendanceHeatmapMatch.collegeId = new mongoose.Types.ObjectId(req.user.collegeId);
+    } else if (subRole === 'department_head' && req.user.departmentId) {
+      attendanceHeatmapMatch.departmentId = new mongoose.Types.ObjectId(req.user.departmentId);
+    }
+
+    const attendanceHeatmap = await Attendance.aggregate([
+      { $match: attendanceHeatmapMatch },
+      {
+        $project: {
+          day: { $dayOfWeek: { date: "$timeIn", timezone: "Asia/Manila" } },
+          hour: { $hour: { date: "$timeIn", timezone: "Asia/Manila" } }
+        }
+      },
+      {
+        $group: {
+          _id: { day: "$day", hour: "$hour" },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const heatmapMap = new Map();
+    [...logHeatmap, ...attendanceHeatmap].forEach(item => {
+      const key = `${item._id.day}-${item._id.hour}`;
+      heatmapMap.set(key, (heatmapMap.get(key) || 0) + item.count);
+    });
+
+    const heatmapData = Array.from(heatmapMap.entries()).map(([key, count]) => {
+      const [day, hour] = key.split("-").map(Number);
+      return { day, hour, count };
+    });
 
     res.status(200).json({
       roles: rolesSummary,
@@ -532,9 +657,14 @@ export const getAnalyticsOverview = async (req: AuthRequest, res: Response) => {
           college: req.user?.college || null,
           department: req.user?.department || null,
         },
-        selfAttendance,
+        selfAttendance: {
+          ...selfAttendance,
+          punctualityScore: selfPunctualityScore,
+          avgServiceTimeMinutes
+        },
         managedAttendance,
       },
+      heatmap: heatmapData,
     });
   } catch (error) {
     console.error(error);

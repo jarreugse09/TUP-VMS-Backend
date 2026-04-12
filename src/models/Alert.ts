@@ -2,15 +2,18 @@ import mongoose, { Document, Schema } from "mongoose";
 
 export interface IAlert extends Document {
     _id: mongoose.Types.ObjectId;
-    type: "weapon" | "suspicious" | "system";
+    type: "weapon" | "suspicious" | "intrusion" | "loitering" | "unattended" | "other";
     title: string;
     message: string;
-    cameraSource: string;
+    cameraSource: string;                        // plan: zoneId
     detectionLabel: string;
     detectedObjects?: string[];
     confidence: number;
     severity: "critical" | "high" | "medium" | "low";
     imageUrl?: string;
+    // Plan fields added for role-based routing
+    audience: string[];                          // e.g. ["security_head", "superadmin"]
+    collegeId?: mongoose.Types.ObjectId;         // for college-scoped alerts
     recipientStates: Array<{
         userId: mongoose.Types.ObjectId;
         isRead: boolean;
@@ -21,6 +24,9 @@ export interface IAlert extends Document {
         resolvedBy?: mongoose.Types.ObjectId;
         resolvedAt?: Date;
     }>;
+    globalIncidentStatus: "new" | "acknowledged" | "resolved"; // plan: status = "active | responded | false_alarm"
+    responderId?: mongoose.Types.ObjectId;
+    resolutionNote?: string;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -47,7 +53,7 @@ const AlertSchema: Schema = new Schema(
     {
         type: {
             type: String,
-            enum: ["weapon", "suspicious", "system"],
+            enum: ["weapon", "suspicious", "intrusion", "loitering", "unattended", "other"],
             required: true,
         },
         title: { type: String, required: true },
@@ -62,10 +68,20 @@ const AlertSchema: Schema = new Schema(
             required: true,
         },
         imageUrl: { type: String },
+        // Plan Section 3.11 — role-based audience routing
+        audience: [{ type: String }],            // e.g. ["security_head", "superadmin"]
+        collegeId: { type: Schema.Types.ObjectId, ref: "College", default: null },
         recipientStates: {
             type: [AlertRecipientStateSchema],
             default: [],
         },
+        globalIncidentStatus: {
+            type: String,
+            enum: ["new", "acknowledged", "resolved"],
+            default: "new",
+        },
+        responderId: { type: Schema.Types.ObjectId, ref: "User" },
+        resolutionNote: { type: String },
     },
     {
         timestamps: true,

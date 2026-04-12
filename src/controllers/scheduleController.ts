@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import mongoose from "mongoose";
 import SpecialSchedule from "../models/SpecialSchedule";
 import User from "../models/User";
 import WorkSchedule from "../models/WorkSchedule";
@@ -7,6 +8,7 @@ import { catchAsync } from "../utils/catchAsync";
 import { computeDailyAttendance } from "../utils/attendanceComputer";
 import { getScopedUserQuery } from "../utils/orgRbac";
 import { getNormalizedSubRole } from "../utils/rbac";
+import { requireValidObjectId } from "../utils/validate";
 
 interface AuthRequest extends Request {
   user?: any;
@@ -59,6 +61,8 @@ export const updateWorkSchedule = catchAsync(async (req: AuthRequest, res: Respo
   const { id } = req.params;
   const { name, days, timeIn, timeOut, graceMinutes, isFlexible } = req.body;
 
+  if (!requireValidObjectId(id, res)) return;
+
   const schedule = await WorkSchedule.findByIdAndUpdate(
     id,
     {
@@ -85,8 +89,15 @@ export const assignWorkSchedule = catchAsync(async (req: AuthRequest, res: Respo
   const { id } = req.params;
   const { userIds } = req.body as { userIds?: string[] };
 
+  if (!requireValidObjectId(id, res)) return;
+
   if (!Array.isArray(userIds) || userIds.length === 0) {
     throw new AppError("userIds is required", 400);
+  }
+
+  const invalidUserId = userIds.find((userId) => !mongoose.isValidObjectId(userId));
+  if (invalidUserId) {
+    throw new AppError("One or more userIds are invalid", 400);
   }
 
   const schedule = await WorkSchedule.findById(id);
@@ -161,6 +172,8 @@ export const updateSpecialSchedule = catchAsync(async (req: AuthRequest, res: Re
   const { id } = req.params;
   const { type, scope, targetId, date, dateEnd, reason } = req.body;
 
+  if (!requireValidObjectId(id, res)) return;
+
   const schedule = await SpecialSchedule.findByIdAndUpdate(
     id,
     {
@@ -186,6 +199,8 @@ export const updateSpecialSchedule = catchAsync(async (req: AuthRequest, res: Re
 
 export const deleteSpecialSchedule = catchAsync(async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
+
+  if (!requireValidObjectId(id, res)) return;
 
   const schedule = await SpecialSchedule.findByIdAndDelete(id);
   if (!schedule) {

@@ -12,6 +12,7 @@ type ViewerLike = {
 };
 
 const WORKFORCE_ROLES = ["Staff", "TUP"];
+const NO_RESULTS_FILTER = { _id: null };
 
 const toIdString = (value?: string | mongoose.Types.ObjectId | null) =>
   value ? String(value) : null;
@@ -20,15 +21,12 @@ const getViewerId = (viewer?: ViewerLike | null) =>
   String(viewer?.id || viewer?._id || "");
 
 export const canViewAllUsers = (viewer?: ViewerLike | null) => {
-  const role = getNormalizedRole(viewer);
   const subRole = getNormalizedSubRole(viewer);
 
   return (
-    role === "tup" ||
+    subRole === "superadmin" ||
     subRole === "hr_head" ||
-    subRole === "hr_staff" ||
-    subRole === "security_head" ||
-    subRole === "security_staff"
+    subRole === "hr_staff"
   );
 };
 
@@ -52,35 +50,57 @@ export const isDepartmentHead = (viewer?: ViewerLike | null) =>
   getNormalizedSubRole(viewer) === "department_head";
 
 const getScopeBaseQuery = (viewer?: ViewerLike | null) => {
-  if (!viewer) return { _id: null };
+  if (!viewer) return NO_RESULTS_FILTER;
 
-  if (canViewAllUsers(viewer)) {
+  const subRole = getNormalizedSubRole(viewer);
+  if (subRole === "superadmin" || subRole === "hr_head" || subRole === "hr_staff") {
     return {};
   }
 
-  const collegeId = toIdString(viewer.collegeId);
-  if (isDean(viewer) && collegeId) {
-    return { collegeId };
+  if (subRole === "dean") {
+    const collegeId = toIdString(viewer.collegeId);
+    return collegeId
+      ? { collegeId }
+      : NO_RESULTS_FILTER;
   }
 
-  const departmentId = toIdString(viewer.departmentId);
-  if (isDepartmentHead(viewer) && departmentId) {
-    return { departmentId };
+  if (subRole === "department_head") {
+    const departmentId = toIdString(viewer.departmentId);
+    return departmentId
+      ? { departmentId }
+      : NO_RESULTS_FILTER;
   }
 
-  const viewerId = getViewerId(viewer);
-  return viewerId ? { _id: viewerId } : { _id: null };
+  if (subRole === "security_head") {
+    return {
+      $or: [
+        { role: { $in: ["Student", "Visitor"] } },
+        { subRole: "security_staff" },
+      ],
+    };
+  }
+
+  if (subRole === "security_staff") {
+    return { role: { $in: ["Student", "Visitor"] } };
+  }
+
+  if (subRole === "top_management" || subRole === "faculty") {
+    return NO_RESULTS_FILTER;
+  }
+
+  return NO_RESULTS_FILTER;
 };
 
 export const getScopedUserQuery = async (
   viewer?: ViewerLike | null,
   options?: { workforceOnly?: boolean; includeSubordinates?: boolean },
 ) => {
-  const scopeQuery = getScopeBaseQuery(viewer);
+  const scopeBase = getScopeBaseQuery(viewer);
+  const subRole = getNormalizedSubRole(viewer);
+  
   const filters: any[] = [];
-
-  if (Object.keys(scopeQuery).length > 0) {
-    filters.push(scopeQuery);
+  if (Object.keys(scopeBase).length > 0) {
+    filters.push(scopeBase);
   }
 
   if (options?.includeSubordinates) {
@@ -90,13 +110,30 @@ export const getScopedUserQuery = async (
     }
   }
 
-  const finalQuery =
-    filters.length === 0 ? {} : filters.length === 1 ? filters[0] : { $or: filters };
+  let finalQuery =
+    filters.length === 0 ? NO_RESULTS_FILTER : filters.length === 1 ? filters[0] : { $or: filters };
+
+  // ─── Apply Strict Silo Gating (Global for the result set) ──────────────────────────────────
+  if (subRole === "dean") {
+    // Deans see college-scoped users only and never fail open on missing college assignment.
+    finalQuery = {
+      $and: [
+        finalQuery,
+        { subRole: { $in: ["department_head", "faculty"] } },
+      ]
+    };
+  } else if (subRole === "department_head") {
+    finalQuery = {
+      $and: [
+        finalQuery,
+        { subRole: "faculty" },
+      ]
+    };
+  }
 
   if (options?.workforceOnly) {
-    return {
-      ...finalQuery,
-      role: { $in: WORKFORCE_ROLES },
+    finalQuery = {
+      $and: [finalQuery, { role: { $in: WORKFORCE_ROLES } }],
     };
   }
 

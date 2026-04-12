@@ -7,6 +7,8 @@ import {
     markAllAsRead,
     deleteAlert,
     updateIncidentStatus,
+    acknowledgeAlert,
+    resolveAlert,
 } from "../controllers/alertController";
 import {
     authenticateToken,
@@ -26,6 +28,8 @@ router.get("/unread-count", authenticateToken, authorizeAlertAudience, getUnread
 router.patch("/:id/read", authenticateToken, authorizeAlertAudience, markAsRead);
 router.patch("/read-all", authenticateToken, authorizeAlertAudience, markAllAsRead);
 router.patch("/:id/status", authenticateToken, authorizeAlertAudience, updateIncidentStatus);
+router.patch("/:id/acknowledge", authenticateToken, authorizeAlertAudience, acknowledgeAlert);
+router.patch("/:id/resolve", authenticateToken, authorizeAlertAudience, resolveAlert);
 router.delete("/:id", authenticateToken, authorizeTupSuperAdmin, deleteAlert);
 
 export default router;

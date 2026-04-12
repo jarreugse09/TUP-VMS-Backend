@@ -6,14 +6,23 @@ import {
   getProfile,
   requestQRChange,
   getQRRequests,
+  createQRRequest,
   approveQRRequest,
   rejectQRRequest,
+  editQRRequest,
+  deleteQRRequest,
   getAllUsers,
+  getUserById,
   adminRegisterUser,
   completeFirstPhotoCapture,
   requestProfilePhotoChange,
+  recordConsent,
+  suspendUser,
+  blockUser,
+  unblockUser,
+  directUpdatePhoto,
 } from "../controllers/userController";
-import { authenticateToken, authorizeRoles } from "../middlewares/auth";
+import { authenticateToken, authorizeRoles, validateRbac } from "../middlewares/auth";
 import { body } from "express-validator";
 
 const router = express.Router();
@@ -58,10 +67,25 @@ router.get(
   ),
   getAllUsers,
 );
+
+router.get(
+  "/admin/:id",
+  authenticateToken,
+  authorizeRoles(
+    "TUP",
+    "dean",
+    "department_head",
+    "hr_head",
+    "hr_staff",
+    "security_head",
+  ),
+  getUserById,
+);
+
 router.post(
   "/admin/register",
   authenticateToken,
-  authorizeRoles("TUP"),
+  authorizeRoles("TUP", "hr_head", "hr_staff", "security_head"),
   [
     body("firstName").notEmpty(),
     body("surname").notEmpty(),
@@ -104,6 +128,15 @@ router.post(
   adminRegisterUser,
 );
 router.get("/profile", authenticateToken, getProfile);
+// DPA 2012 — consent endpoint: all authenticated users
+router.put("/me/consent", authenticateToken, recordConsent);
+// PUT /api/users/me/photo — direct update for Staff/TUP (no approval needed)
+router.put(
+  "/me/photo",
+  authenticateToken,
+  profileUpload.single("photo"),
+  directUpdatePhoto
+);
 router.post(
   "/profile/first-photo",
   authenticateToken,
@@ -124,20 +157,58 @@ router.post(
 router.get(
   "/qr-requests",
   authenticateToken,
-  authorizeRoles("TUP"),
   getQRRequests,
 );
-router.put(
+router.post(
+  "/qr-requests",
+  authenticateToken,
+  createQRRequest,
+);
+router.patch(
   "/qr-requests/:requestId/approve",
   authenticateToken,
-  authorizeRoles("TUP"),
+  validateRbac([], ["superadmin", "hr_head", "hr_staff", "security_head"]),
   approveQRRequest,
 );
-router.put(
+router.patch(
   "/qr-requests/:requestId/reject",
   authenticateToken,
-  authorizeRoles("TUP"),
+  validateRbac([], ["superadmin", "hr_head", "hr_staff", "security_head"]),
   rejectQRRequest,
+);
+router.patch(
+  "/qr-requests/:requestId",
+  authenticateToken,
+  validateRbac([], ["superadmin", "hr_head", "security_head"]),
+  editQRRequest,
+);
+router.delete(
+  "/qr-requests/:requestId",
+  authenticateToken,
+  validateRbac([], ["superadmin"]),
+  deleteQRRequest,
+);
+
+// R2: Suspension and Blocking routes
+router.patch(
+  "/:id/suspend",
+  authenticateToken,
+  validateRbac([], ["superadmin", "hr_head", "hr_staff", "security_head"]),
+  suspendUser
+);
+
+router.patch(
+  "/:id/block",
+  authenticateToken,
+  validateRbac([], ["superadmin", "hr_head", "hr_staff", "security_head"]),
+  blockUser
+);
+
+router.patch(
+  "/:id/unblock",
+  authenticateToken,
+  validateRbac([], ["superadmin", "hr_head", "security_head"]),
+  unblockUser
 );
 
 export default router;

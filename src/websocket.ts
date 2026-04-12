@@ -3,10 +3,69 @@ import { Server } from "http";
 import jwt from "jsonwebtoken";
 import Alert from "./models/Alert";
 import ChatMessage from "./models/ChatMessage";
+import type { JwtPayload } from "jsonwebtoken";
+
+type SocketMessage =
+    | {
+          type: "SEND_CHAT_MESSAGE";
+          content?: string;
+          recipientId?: string | null;
+          replyTo?: string;
+          isSystemMessage?: boolean;
+          mentions?: string[];
+          threadId?: string;
+      }
+    | {
+          type: "MARK_ALERT_READ";
+          alertId?: string;
+      }
+    | {
+          type: "MARK_CHAT_READ";
+          messageId?: string;
+      }
+    | {
+          type: "PING";
+      };
+
+interface TokenPayload extends JwtPayload {
+    id?: string;
+    userId?: string;
+    role?: string;
+    staffType?: string;
+    subRole?: string;
+    name?: string;
+}
+
+interface AlertSocketPayload {
+    _id?: string;
+    recipientStates?: Array<{
+        userId: string;
+        isRead?: boolean;
+        readAt?: Date | null;
+    }>;
+    [key: string]: unknown;
+}
+
+interface ChatSocketPayload {
+    _id?: string | { toString(): string };
+    senderId?: string | { toString(): string } | null;
+    senderName?: string;
+    senderRole?: string;
+    recipientId?: string | { toString(): string } | null;
+    message?: string;
+    replyTo?: string | { toString(): string } | null;
+    isSystemMessage?: boolean;
+    mentions?: Array<string | { toString(): string }>;
+    threadId?: string | { toString(): string } | null;
+    isRead?: boolean;
+    createdAt?: Date;
+    groupId?: string;
+}
 
 interface AuthenticatedWebSocket extends WebSocket {
     userId?: string;
     userRole?: string;
+    userSubRole?: string;
     userName?: string;
 }
 
@@ -72,14 +131,15 @@ export function setupWebSocket(server: Server) {
             // Verify JWT token
             const decoded = jwt.verify(
                 token,
-                process.env.JWT_SECRET || "your-secret-key"
-            ) as any;
+                process.env.JWT_SECRET!
+            ) as TokenPayload;
 
             ws.userId = decoded.id || decoded.userId;
             ws.userRole =
                 decoded.role === "Staff" && decoded.staffType === "Security"
                     ? "Security"
                     : decoded.role;
+            ws.userSubRole = decoded.subRole;
             ws.userName = decoded.name || "Unknown";
 
             // Store connection
@@ -133,7 +193,7 @@ export function setupWebSocket(server: Server) {
     return wss;
 }
 
-async function handleMessage(ws: AuthenticatedWebSocket, message: any) {
+async function handleMessage(ws: AuthenticatedWebSocket, message: SocketMessage) {
     switch (message.type) {
         case "SEND_CHAT_MESSAGE":
             await handleChatMessage(ws, message);
@@ -151,19 +211,21 @@ async function handleMessage(ws: AuthenticatedWebSocket, message: any) {
             ws.send(JSON.stringify({ type: "PONG" }));
             break;
 
-        default:
+        default: {
+            const unknownMessage = message as { type?: string };
             ws.send(
                 JSON.stringify({
                     type: "ERROR",
-                    message: `Unknown message type: ${message.type}`,
+                    message: `Unknown message type: ${unknownMessage.type}`,
                 })
             );
+        }
     }
 }
 
 async function handleChatMessage(
     ws: AuthenticatedWebSocket,
-    message: any
+    message: Extract<SocketMessage, { type: "SEND_CHAT_MESSAGE" }>
 ) {
     if (!ws.userId || !message.content) {
         ws.send(
@@ -182,6 +244,10 @@ async function handleChatMessage(
         senderRole: ws.userRole,
         recipientId: message.recipientId || null,
         message: message.content,
+        replyTo: message.replyTo || undefined,
+        isSystemMessage: message.isSystemMessage || false,
+        mentions: Array.isArray(message.mentions) ? message.mentions : undefined,
+        threadId: message.threadId || undefined,
     });
 
     // Broadcast to all connected clients (or specific recipient)
@@ -201,7 +267,7 @@ async function handleChatMessage(
 
 async function handleMarkAlertRead(
     ws: AuthenticatedWebSocket,
-    message: any
+    message: Extract<SocketMessage, { type: "MARK_ALERT_READ" }>
 ) {
     if (!ws.userId || !message.alertId) {
         return;
@@ -235,7 +301,7 @@ async function handleMarkAlertRead(
 
 async function handleMarkChatRead(
     ws: AuthenticatedWebSocket,
-    message: any
+    message: Extract<SocketMessage, { type: "MARK_CHAT_READ" }>
 ) {
     if (!ws.userId || !message.messageId) {
         return;
@@ -253,7 +319,7 @@ async function handleMarkChatRead(
     );
 }
 
-export function broadcastAlert(alert: any, userId?: string) {
+export function broadcastAlert(alert: AlertSocketPayload, userId?: string) {
     const message = {
         type: "NEW_ALERT",
         alert,
@@ -296,7 +362,7 @@ export function broadcastAllAlertsRead(userId?: string) {
     broadcast(message);
 }
 
-export function broadcastAlertUpdated(alert: any, userId?: string) {
+export function broadcastAlertUpdated(alert: AlertSocketPayload, userId?: string) {
     const message = {
         type: "ALERT_UPDATED",
         alert,
@@ -310,7 +376,31 @@ export function broadcastAlertUpdated(alert: any, userId?: string) {
     broadcast(message);
 }
 
-function buildChatBroadcastMessage(chatMessage: any) {
+const SECURITY_GROUP_SUBROLES = new Set([
+    "security_staff",
+    "security_head",
+    "superadmin",
+    "top_management",
+]);
+
+export function broadcastToGroup(groupId: string, payload: Record<string, unknown>) {
+    const serialized = JSON.stringify(payload);
+
+    connectedClients.forEach((sockets) => {
+        sockets.forEach((client) => {
+            const normalizedSubRole = String(client.userSubRole || "").toLowerCase();
+            const isSecurityGeneralAudience =
+                groupId === "security_general" &&
+                SECURITY_GROUP_SUBROLES.has(normalizedSubRole);
+
+            if (client.readyState === WebSocket.OPEN && isSecurityGeneralAudience) {
+                client.send(serialized);
+            }
+        });
+    });
+}
+
+function buildChatBroadcastMessage(chatMessage: ChatSocketPayload) {
     return {
         type: "NEW_CHAT_MESSAGE",
         message: {
@@ -320,13 +410,17 @@ function buildChatBroadcastMessage(chatMessage: any) {
             senderRole: chatMessage.senderRole,
             recipientId: chatMessage.recipientId ? String(chatMessage.recipientId) : null,
             message: chatMessage.message,
+            replyTo: chatMessage.replyTo ? String(chatMessage.replyTo) : undefined,
+            isSystemMessage: Boolean(chatMessage.isSystemMessage),
+            mentions: Array.isArray(chatMessage.mentions) ? chatMessage.mentions.map((id) => String(id)) : undefined,
+            threadId: chatMessage.threadId ? String(chatMessage.threadId) : undefined,
             isRead: Boolean(chatMessage.isRead),
             createdAt: chatMessage.createdAt,
         },
     };
 }
 
-export function broadcastChatMessage(chatMessage: any, recipientUserIds?: string[]) {
+export function broadcastChatMessage(chatMessage: ChatSocketPayload, recipientUserIds?: string[]) {
     const message = buildChatBroadcastMessage(chatMessage);
 
     if (recipientUserIds && recipientUserIds.length > 0) {
@@ -337,6 +431,11 @@ export function broadcastChatMessage(chatMessage: any, recipientUserIds?: string
     if (chatMessage.recipientId) {
         const recipientId = String(chatMessage.recipientId);
         sendToUsers([recipientId], message);
+        return;
+    }
+
+    if (chatMessage.groupId === "security_general" || chatMessage.senderRole === "System") {
+        broadcastToGroup("security_general", message);
         return;
     }
 

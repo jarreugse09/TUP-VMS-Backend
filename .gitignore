@@ -3,3 +3,5 @@ dist/
 .env
 .gitignore
 .codex
+scratch
+scratch/*

@@ -11,7 +11,8 @@ const normalize = (value?: string | null) =>
     .replace(/[\s-]+/g, "_");
 
 const SECURITY_KEYS = new Set(["security", "security_head", "security_staff"]);
-const SUPERADMIN_KEYS = new Set(["", "admin", "superadmin"]);
+// Superadmin MUST have explicit subRole === "superadmin" — empty subRole is NOT superadmin
+const SUPERADMIN_KEYS = new Set(["superadmin"]);
 
 export const getNormalizedRole = (user?: UserLike | null) => normalize(user?.role);
 
@@ -40,8 +41,13 @@ export const isTupSuperAdmin = (user?: UserLike | null): boolean => {
   const role = getNormalizedRole(user);
   const subRole = getNormalizedSubRole(user);
 
-  return role === "tup" && SUPERADMIN_KEYS.has(subRole);
+  // MUST be role "tup" with explicit subRole "superadmin"
+  // Empty or null subRole is NOT superadmin (prevents privilege escalation)
+  return role === "tup" && subRole === "superadmin";
 };
+
+// Alias for frontend rbac.ts
+export const isSecurityUser = isSecurityAccount;
 
 export const getEffectiveRole = (user?: UserLike | null): string => {
   if (isSecurityAccount(user)) return "Security";
@@ -74,7 +80,11 @@ export const matchesRoleToken = (
 };
 
 export const isAlertAudience = (user?: UserLike | null): boolean => {
-  return isTupSuperAdmin(user) || isSecurityAccount(user);
+  return (
+    isTupSuperAdmin(user) ||
+    isSecurityAccount(user) ||
+    getNormalizedSubRole(user) === "top_management"
+  );
 };
 
 export const buildSecurityAudienceQuery = () => ({
@@ -95,12 +105,7 @@ export const buildAlertAudienceQuery = () => ({
   $or: [
     {
       role: "TUP",
-      $or: [
-        { subRole: { $exists: false } },
-        { subRole: null },
-        { subRole: "" },
-        { subRole: { $in: ["admin", "superadmin"] } },
-      ],
+      subRole: { $in: ["superadmin", "top_management"] },
     },
     buildSecurityAudienceQuery(),
   ],
