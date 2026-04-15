@@ -6,7 +6,7 @@ import {
   getWorkSchedules,
   updateWorkSchedule,
 } from "../controllers/scheduleController";
-import { authenticateToken, authorizeRoles } from "../middlewares/auth";
+import { authenticateToken, authorizeRoles, validateRbac } from "../middlewares/auth";
 
 const router = express.Router();
 
@@ -25,13 +25,13 @@ router.get(
 router.post(
   "/",
   authenticateToken,
-  authorizeRoles("hr_head", "hr_staff", "security_head"),
+  validateRbac(["hr_head", "hr_staff", "security_head"]), // Bug 6 fix — validateRbac has superadmin bypass
   createWorkSchedule,
 );
 router.put(
   "/:id",
   authenticateToken,
-  authorizeRoles("hr_head", "hr_staff", "security_head"),
+  validateRbac(["hr_head", "hr_staff", "security_head"]), // Bug 6 fix — validateRbac has superadmin bypass
   updateWorkSchedule,
 );
 router.post(

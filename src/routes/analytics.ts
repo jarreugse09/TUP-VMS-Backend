@@ -18,6 +18,9 @@ router.get(
     "hr_staff",
     "security_head",
     "security_staff",
+    "top_management",
+    "student",
+    "visitor",
   ),
   getAnalyticsOverview,
 );
@@ -32,6 +35,7 @@ router.get(
     "hr_staff",
     "security_head",
     "security_staff",
+    "top_management",
   ),
   getHourlyAnalytics,
 );

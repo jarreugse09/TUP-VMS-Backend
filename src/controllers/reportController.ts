@@ -99,7 +99,7 @@ export const generateDTR = async (req: AuthRequest, res: Response) => {
     }
 
     const attendances = await Attendance.find(query)
-      .populate("staffId", "firstName surname email role subRole designation")
+      .populate("staffId", "firstName surname middleName email role subRole designation") // Bug 11 fix — explicitly include middleName
       .sort({ date: 1 })
       .lean();
 
